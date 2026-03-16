@@ -10,7 +10,7 @@ const STORAGE_KEY = "riffmachine:v3";
 
 const SEED_CATEGORIES = ["art", "music", "tech", "philosophy", "finance", "food", "nature", "news", "random", "other"];
 const ICONS = { article: "\u{1F4C4}", visual: "\u{1F5BC}", music: "\u{1F3B5}", book: "\u{1F4D6}", concept: "\u{1F4A1}", person: "\u{1F464}" };
-const CAT_ICONS = { art: "\u{1F3A8}", music: "\u{1F3B6}", tech: "\u26A1", philosophy: "\u{1F9E0}", finance: "\u{1F4B0}", food: "\u{1F373}", nature: "\u{1F33F}", news: "\u{1F4F0}", random: "\u{1F3B2}", other: "\u2726" };
+const CAT_ICONS = { art: "\u{1F3A8}", music: "\u{1F3B6}", tech: "\u26A1", philosophy: "\u{1F9E0}", finance: "\u{1F4B0}", food: "\u{1F373}", nature: "\u{1F33F}", news: "\u{1F4F0}", random: "\u{1F3B2}", other: "\✦" };
 const TYPE_LABELS = { article: "Article", visual: "Visual", music: "Music", book: "Book", concept: "Concept", person: "Person" };
 
 /* ── Storage ── */
@@ -82,35 +82,64 @@ function extractItems(text) {
 }
 
 /* ── Prompts ── */
-function riffPrompt(seedText, category, allSeeds) {
-  const otherSeeds = (allSeeds || []).filter(s => s.text !== seedText || s.category !== category);
-  let crossSection = "";
-  if (otherSeeds.length > 0) {
-    const lines = otherSeeds.map(s => {
-      const titles = (s.riffs || []).map(r => `"${r.title}"`).join(", ");
-      return `- [${s.category}] "${s.text}"${titles ? ` \u2014 found: ${titles}` : ""}`;
+function riffPrompt(selectedSeed, allSeeds) {
+  const seedText = selectedSeed.text;
+  const category = selectedSeed.category;
+  const others = (allSeeds || []).filter(s => s.id !== selectedSeed.id);
+  const isMultiSeed = others.length > 0;
+
+  let seedList = "";
+  let prevResources = "";
+  if (isMultiSeed) {
+    seedList = allSeeds.map(s => {
+      const marker = s.id === selectedSeed.id ? " (FOCUSED)" : "";
+      return `- [${s.category}] "${s.text}"${marker}`;
     }).join("\n");
-    crossSection = `
-
-CROSS-POLLINATION (CRITICAL):
-The user has other seeds and discoveries listed below. At least 1-2 of your 4-5 results MUST bridge between the current seed and one or more other seeds. In the "link" field, explicitly name which other seed this connects to and how. Don't force it \u2014 find genuine, surprising connections.
-
-Other seeds in the user's collection:
-${lines}`;
+    const allPrev = allSeeds.flatMap(s =>
+      (s.riffs || []).map(r => `- "${r.title}" (from "${s.text}")`)
+    );
+    prevResources = allPrev.length > 0
+      ? "\n\nPreviously discovered resources (titles only):\n" + allPrev.join("\n")
+      : "";
   }
 
-  return {
-    system: `You are a discovery engine. Given a seed idea in the "${category}" domain, find 4-5 REAL specific resources. Return ONLY a JSON array \u2014 no markdown, no backticks, no wrapper object.
+  const multiSeedSystem = `You are a creative discovery engine that finds unexpected connections ACROSS multiple ideas.
+
+The user has a collection of seed ideas across different domains. Your job is to find resources that BRIDGE between these seeds -- not just match one of them. The best results are ones nobody would find by searching any single seed alone.
+
+The user is currently focused on: "${seedText}" [${category}]
+
+Their full collection of seeds:
+${seedList}${prevResources}
+
+Return ONLY a JSON array of 4-5 resources. Each resource MUST connect to the focused seed AND at least one other seed. No resource should only relate to a single seed.
+
+Each item: {"type":"article|visual|music|book|concept|person","title":"...","url":"https://...","desc":"1-2 sentences explaining how this connects MULTIPLE seeds together","link":"Names which 2+ seeds this bridges and how"}
+
+RULES:
+- Real URLs from known domains (wikipedia, youtube, spotify, arxiv, goodreads, guardian, nytimes, etc)
+- Every result MUST bridge 2+ seeds. If it only relates to one seed, don't include it.
+- The "link" field must explicitly name which seeds are connected, e.g. "Bridges 'apple' and 'Miro' through..."
+- Be surprising. The value is in connections humans wouldn't make.
+- Keep descriptions SHORT. 1-2 sentences max.
+- Return ONLY the JSON array. Nothing else.`;
+
+  const singleSeedSystem = `You are a discovery engine. Given a seed idea in the "${category}" domain, find 4-5 REAL specific resources. Return ONLY a JSON array -- no markdown, no backticks, no wrapper object.
 
 Each item: {"type":"article|visual|music|book|concept|person","title":"...","url":"https://...","desc":"1-2 sentences on why this connects","link":"how it relates to another item here"}
 
 RULES:
 - Real URLs from known domains (wikipedia, youtube, spotify, arxiv, goodreads, guardian, nytimes, etc)
-- The "${category}" lens should shape your picks \u2014 find resources that speak to this seed THROUGH ${category}
-- Be surprising. Skip the obvious. Find oblique connections.
+- The "${category}" lens should shape your picks -- find resources that speak to this seed THROUGH ${category}
+- Be surprising. Skip the obvious. Find oblique, cross-domain connections.
 - Keep descriptions SHORT. 1-2 sentences max.
-- Return ONLY the JSON array. Nothing else.${crossSection}`,
-    user: `Seed: "${seedText}" [category: ${category}]`
+- Return ONLY the JSON array. Nothing else.`;
+
+  return {
+    system: isMultiSeed ? multiSeedSystem : singleSeedSystem,
+    user: isMultiSeed
+      ? `Find resources that connect my seeds together, focused on: "${seedText}"`
+      : `Seed: "${seedText}" [category: ${category}]`
   };
 }
 
@@ -185,7 +214,7 @@ function SynthesisCard({ syn, index }) {
         </div>
       )}
       {syn.refs?.length > 0 && (
-        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" \u00B7 ")}</div>
+        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" \· ")}</div>
       )}
       {syn.leads?.map((lead, i) => <ResourceCard key={i} item={lead} index={i} />)}
     </article>
@@ -210,13 +239,14 @@ function SeedItem({ seed, isSelected, onClick, onDelete }) {
           </span>
         </div>
         <div style={{ fontSize: 10.5, color: isSelected ? "#aaa" : "#999", marginTop: 2, paddingLeft: 22 }}>
-          {seed.category}{count > 0 ? ` \u00B7 ${count} found` : ""}
+          {seed.category}{count > 0 ? ` \· ${count} found` : ""}
         </div>
       </div>
       <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{
         background: "none", border: "none", cursor: "pointer",
         color: isSelected ? "#777" : "#ccc", fontSize: 15, lineHeight: 1, flexShrink: 0,
-      }}>\u00D7</button>
+        display: "flex", alignItems: "center",
+      }}><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.5" fill="none"><line x1="1" y1="1" x2="9" y2="9" /><line x1="9" y1="1" x2="1" y2="9" /></svg></button>
     </div>
   );
 }
@@ -302,7 +332,7 @@ export default function RiffMachine() {
     setLoading(true); setError(null); setView("riffs"); setStreamItems([]);
     abortRef.current = new AbortController();
     try {
-      const { system, user } = riffPrompt(selected.text, selected.category, seeds);
+      const { system, user } = riffPrompt(selected, seeds);
       const fullText = await streamAPI(system, user, (partial) => {
         setStreamItems(extractItems(partial));
       }, abortRef.current.signal);
@@ -314,7 +344,7 @@ export default function RiffMachine() {
           items = Array.isArray(parsed) ? parsed : (parsed.categories || []);
         } catch {}
       }
-      if (items.length === 0) throw new Error("No resources found \u2014 try riffing again");
+      if (items.length === 0) throw new Error("No resources found \— try riffing again");
       setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [...(s.riffs || []), ...items] } : s));
       setStreamItems([]);
     } catch (e) {
@@ -378,7 +408,7 @@ export default function RiffMachine() {
   }, [seeds, syntheses]);
 
   const handleReset = useCallback(() => {
-    if (!window.confirm("Clear all seeds, riffs, and syntheses? This can\u2019t be undone.")) return;
+    if (!window.confirm("Clear all seeds, riffs, and syntheses? This can\’t be undone.")) return;
     setSeeds([]);
     setSyntheses([]);
     setSelectedId(null);
@@ -436,7 +466,7 @@ export default function RiffMachine() {
                 <input ref={inputRef} value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && addSeed()}
-                  placeholder="Enter a seed idea\u2026"
+                  placeholder="Enter a seed idea\…"
                   style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit", minHeight: 44, minWidth: 0 }}
                 />
                 <button onClick={addSeed} disabled={!input.trim()} style={{
@@ -460,7 +490,7 @@ export default function RiffMachine() {
                   <input ref={inputRef} value={input}
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && addSeed()}
-                    placeholder="Enter a seed idea\u2026"
+                    placeholder="Enter a seed idea\…"
                     style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }}
                   />
                   <button onClick={addSeed} disabled={!input.trim()} style={{
@@ -545,10 +575,10 @@ export default function RiffMachine() {
             <div style={{ display: "flex", gap: 4, marginTop: 2, flex: isMobile ? "1 1 100%" : undefined }}>
               <button onClick={handleExportAll} disabled={seeds.length === 0} style={{
                 ...smallBtn(seeds.length > 0), flex: 1, minHeight: isMobile ? 44 : undefined,
-              }}>\u2193 Export All</button>
+              }}>Export All</button>
               <button onClick={handleCopyAll} disabled={seeds.length === 0} style={{
                 ...smallBtn(seeds.length > 0), flex: 1, minHeight: isMobile ? 44 : undefined,
-              }}>{copied ? "\u2713 Copied" : "\u2398 Copy MD"}</button>
+              }}>{copied ? "Copied!" : "Copy MD"}</button>
             </div>
             <button onClick={handleReset} style={{
               background: "none", border: "none", padding: "4px 0",
@@ -596,8 +626,8 @@ export default function RiffMachine() {
               {/* Per-seed export — desktop only in tab bar */}
               {!isMobile && view === "riffs" && selected?.riffs?.length > 0 && (
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={handleExportSeed} style={smallBtn()}>\u2193 .md</button>
-                  <button onClick={handleCopySeed} style={smallBtn()}>{copied ? "\u2713" : "\u2398"} Copy</button>
+                  <button onClick={handleExportSeed} style={smallBtn()}>Export .md</button>
+                  <button onClick={handleCopySeed} style={smallBtn()}>{copied ? "Copied!" : "Copy"}</button>
                 </div>
               )}
             </div>
@@ -631,8 +661,8 @@ export default function RiffMachine() {
                 {/* Per-seed export — mobile: below header */}
                 {isMobile && selected?.riffs?.length > 0 && (
                   <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                    <button onClick={handleExportSeed} style={{ ...smallBtn(), minHeight: 44 }}>\u2193 .md</button>
-                    <button onClick={handleCopySeed} style={{ ...smallBtn(), minHeight: 44 }}>{copied ? "\u2713" : "\u2398"} Copy</button>
+                    <button onClick={handleExportSeed} style={{ ...smallBtn(), minHeight: 44 }}>Export .md</button>
+                    <button onClick={handleCopySeed} style={{ ...smallBtn(), minHeight: 44 }}>{copied ? "Copied!" : "Copy"}</button>
                   </div>
                 )}
               </div>
@@ -662,7 +692,7 @@ export default function RiffMachine() {
                 )}
                 {filtered.map((item, i) => <ResourceCard key={`${selected.id}-${i}-${item.title}`} item={item} index={i} />)}
                 {loading && filtered.length === 0 && (
-                  <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>Discovering\u2026 <Dots /></div>
+                  <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering\…"} <Dots /></div>
                 )}
               </div>
             </>
@@ -677,7 +707,7 @@ export default function RiffMachine() {
                 </div>
               )}
               {syntheses.map((syn, i) => <SynthesisCard key={i} syn={syn} index={i} />)}
-              {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>Synthesizing\u2026 <Dots /></div>}
+              {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing\…"} <Dots /></div>}
             </div>
           ) : null}
         </main>
