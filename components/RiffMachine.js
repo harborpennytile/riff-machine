@@ -82,18 +82,34 @@ function extractItems(text) {
 }
 
 /* ── Prompts ── */
-function riffPrompt(seedText, category) {
+function riffPrompt(seedText, category, allSeeds) {
+  const otherSeeds = (allSeeds || []).filter(s => s.text !== seedText || s.category !== category);
+  let crossSection = "";
+  if (otherSeeds.length > 0) {
+    const lines = otherSeeds.map(s => {
+      const titles = (s.riffs || []).map(r => `"${r.title}"`).join(", ");
+      return `- [${s.category}] "${s.text}"${titles ? ` \u2014 found: ${titles}` : ""}`;
+    }).join("\n");
+    crossSection = `
+
+CROSS-POLLINATION (CRITICAL):
+The user has other seeds and discoveries listed below. At least 1-2 of your 4-5 results MUST bridge between the current seed and one or more other seeds. In the "link" field, explicitly name which other seed this connects to and how. Don't force it \u2014 find genuine, surprising connections.
+
+Other seeds in the user's collection:
+${lines}`;
+  }
+
   return {
-    system: `You are a discovery engine. Given a seed idea in the "${category}" domain, find 4-5 REAL specific resources. Return ONLY a JSON array — no markdown, no backticks, no wrapper object.
+    system: `You are a discovery engine. Given a seed idea in the "${category}" domain, find 4-5 REAL specific resources. Return ONLY a JSON array \u2014 no markdown, no backticks, no wrapper object.
 
 Each item: {"type":"article|visual|music|book|concept|person","title":"...","url":"https://...","desc":"1-2 sentences on why this connects","link":"how it relates to another item here"}
 
 RULES:
 - Real URLs from known domains (wikipedia, youtube, spotify, arxiv, goodreads, guardian, nytimes, etc)
-- The "${category}" lens should shape your picks — find resources that speak to this seed THROUGH ${category}
+- The "${category}" lens should shape your picks \u2014 find resources that speak to this seed THROUGH ${category}
 - Be surprising. Skip the obvious. Find oblique connections.
 - Keep descriptions SHORT. 1-2 sentences max.
-- Return ONLY the JSON array. Nothing else.`,
+- Return ONLY the JSON array. Nothing else.${crossSection}`,
     user: `Seed: "${seedText}" [category: ${category}]`
   };
 }
@@ -286,7 +302,7 @@ export default function RiffMachine() {
     setLoading(true); setError(null); setView("riffs"); setStreamItems([]);
     abortRef.current = new AbortController();
     try {
-      const { system, user } = riffPrompt(selected.text, selected.category);
+      const { system, user } = riffPrompt(selected.text, selected.category, seeds);
       const fullText = await streamAPI(system, user, (partial) => {
         setStreamItems(extractItems(partial));
       }, abortRef.current.signal);
