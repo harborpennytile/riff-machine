@@ -389,8 +389,11 @@ export default function RiffMachine() {
         }>
           {/* Title + Input */}
           <div style={{ padding: isMobile ? "12px 12px 8px" : "16px 12px 12px", borderBottom: isMobile ? "none" : "1px solid #e0e0e0" }}>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: isMobile ? 8 : 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
               Riff Machine
+            </div>
+            <div style={{ fontSize: 12, color: "#999", fontWeight: 400, marginBottom: isMobile ? 8 : 12 }}>
+              Pick a category, type an idea, hit Riff.
             </div>
 
             {isMobile ? (
@@ -473,11 +476,6 @@ export default function RiffMachine() {
             )
           ) : (
             <div style={{ flex: 1, overflowY: "auto" }}>
-              {seeds.length === 0 && (
-                <div style={{ padding: "32px 12px", textAlign: "center", color: "#aaa", fontSize: 12, lineHeight: 1.7 }}>
-                  Pick a category, add a seed,<br/>then hit Riff.
-                </div>
-              )}
               {seeds.map(seed => (
                 <SeedItem key={seed.id} seed={seed} isSelected={seed.id === selectedId}
                   onClick={() => selectSeed(seed.id)}
