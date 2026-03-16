@@ -377,6 +377,16 @@ export default function RiffMachine() {
     setTimeout(() => setCopied(false), 2000);
   }, [seeds, syntheses]);
 
+  const handleReset = useCallback(() => {
+    if (!window.confirm("Clear all seeds, riffs, and syntheses? This can\u2019t be undone.")) return;
+    setSeeds([]);
+    setSyntheses([]);
+    setSelectedId(null);
+    setView("riffs");
+    setFilter("all");
+    saveState({ seeds: [], selectedId: null, syntheses: [] });
+  }, []);
+
   const committedRiffs = selected?.riffs || [];
   const displayRiffs = loading ? [...committedRiffs, ...streamItems] : committedRiffs;
   const types = ["all", ...new Set(displayRiffs.map(r => r.type).filter(Boolean))];
@@ -540,6 +550,16 @@ export default function RiffMachine() {
                 ...smallBtn(seeds.length > 0), flex: 1, minHeight: isMobile ? 44 : undefined,
               }}>{copied ? "\u2713 Copied" : "\u2398 Copy MD"}</button>
             </div>
+            <button onClick={handleReset} style={{
+              background: "none", border: "none", padding: "4px 0",
+              fontSize: 11, color: "#bbb", textTransform: "uppercase",
+              letterSpacing: "0.06em", cursor: "pointer", fontFamily: "inherit",
+              marginTop: 8, textAlign: "center", width: "100%",
+              flex: isMobile ? "1 1 100%" : undefined,
+            }}
+              onMouseEnter={e => { e.currentTarget.style.color = "#999"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "#bbb"; }}
+            >Reset</button>
           </div>
         </nav>
 
