@@ -10,7 +10,7 @@ const STORAGE_KEY = "riffmachine:v3";
 
 const SEED_CATEGORIES = ["art", "music", "tech", "philosophy", "finance", "food", "nature", "news", "random", "other"];
 const ICONS = { article: "\u{1F4C4}", visual: "\u{1F5BC}", music: "\u{1F3B5}", book: "\u{1F4D6}", concept: "\u{1F4A1}", person: "\u{1F464}" };
-const CAT_ICONS = { art: "\u{1F3A8}", music: "\u{1F3B6}", tech: "\u26A1", philosophy: "\u{1F9E0}", finance: "\u{1F4B0}", food: "\u{1F373}", nature: "\u{1F33F}", news: "\u{1F4F0}", random: "\u{1F3B2}", other: "\✦" };
+const CAT_ICONS = { art: "\u{1F3A8}", music: "\u{1F3B6}", tech: "\u26A1", philosophy: "\u{1F9E0}", finance: "\u{1F4B0}", food: "\u{1F373}", nature: "\u{1F33F}", news: "\u{1F4F0}", random: "\u{1F3B2}", other: "✦" };
 const TYPE_LABELS = { article: "Article", visual: "Visual", music: "Music", book: "Book", concept: "Concept", person: "Person" };
 
 /* ── Storage ── */
