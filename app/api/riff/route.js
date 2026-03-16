@@ -10,6 +10,27 @@ export async function POST(req) {
 
   const body = await req.json();
 
+  // Validate
+  if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  }
+
+  // Sanitise messages
+  const sanitisedMessages = body.messages.map(msg => ({
+    role: msg.role === "assistant" ? "assistant" : "user",
+    content: typeof msg.content === "string"
+      ? msg.content.slice(0, 10000)
+      : String(msg.content).slice(0, 10000),
+  }));
+
+  // Sanitise system prompt
+  const sanitisedSystem = typeof body.system === "string"
+    ? body.system.slice(0, 5000)
+    : "";
+
+  // Cap tokens
+  const maxTokens = Math.min(Number(body.max_tokens) || 2000, 4000);
+
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -19,10 +40,10 @@ export async function POST(req) {
     },
     body: JSON.stringify({
       model: body.model || "claude-sonnet-4-20250514",
-      max_tokens: body.max_tokens || 2000,
+      max_tokens: maxTokens,
       stream: body.stream || false,
-      system: body.system || "",
-      messages: body.messages || [],
+      system: sanitisedSystem,
+      messages: sanitisedMessages,
     }),
   });
 

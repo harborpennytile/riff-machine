@@ -13,6 +13,18 @@ const ICONS = { article: "\u{1F4C4}", visual: "\u{1F5BC}", music: "\u{1F3B5}", b
 const CAT_ICONS = { art: "\u{1F3A8}", music: "\u{1F3B6}", tech: "\u26A1", philosophy: "\u{1F9E0}", finance: "\u{1F4B0}", food: "\u{1F373}", nature: "\u{1F33F}", news: "\u{1F4F0}", random: "\u{1F3B2}", other: "✦" };
 const TYPE_LABELS = { article: "Article", visual: "Visual", music: "Music", book: "Book", concept: "Concept", person: "Person" };
 
+/* ── Sanitisation ── */
+function sanitiseInput(text) {
+  return text
+    .replace(/<[^>]*>/g, "")
+    .replace(/javascript:/gi, "")
+    .replace(/on\w+\s*=/gi, "")
+    .replace(/[{}<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
 /* ── Storage ── */
 async function loadState() {
   for (const key of [STORAGE_KEY, "riffmachine:v2", "riffmachine:state"]) {
@@ -171,6 +183,7 @@ function Dots() {
 }
 
 function ResourceCard({ item, index }) {
+  const safeUrl = item.url && item.url.startsWith("https://") ? item.url : null;
   return (
     <article style={{
       padding: "14px 16px", borderLeft: "3px solid #000", marginBottom: 10,
@@ -183,8 +196,8 @@ function ResourceCard({ item, index }) {
         </span>
       </div>
       <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 5, lineHeight: 1.3 }}>
-        {item.url ? (
-          <a href={item.url} target="_blank" rel="noopener noreferrer"
+        {safeUrl ? (
+          <a href={safeUrl} target="_blank" rel="noopener noreferrer nofollow"
             style={{ color: "#000", textDecoration: "underline", textUnderlineOffset: 2 }}>{item.title}</a>
         ) : item.title}
       </div>
@@ -214,7 +227,7 @@ function SynthesisCard({ syn, index }) {
         </div>
       )}
       {syn.refs?.length > 0 && (
-        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" \· ")}</div>
+        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" · ")}</div>
       )}
       {syn.leads?.map((lead, i) => <ResourceCard key={i} item={lead} index={i} />)}
     </article>
@@ -239,7 +252,7 @@ function SeedItem({ seed, isSelected, onClick, onDelete }) {
           </span>
         </div>
         <div style={{ fontSize: 10.5, color: isSelected ? "#aaa" : "#999", marginTop: 2, paddingLeft: 22 }}>
-          {seed.category}{count > 0 ? ` \· ${count} found` : ""}
+          {seed.category}{count > 0 ? ` · ${count} found` : ""}
         </div>
       </div>
       <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{
@@ -311,7 +324,7 @@ export default function RiffMachine() {
   const seedsWithRiffs = seeds.filter(s => s.riffs?.length > 0).length;
 
   const addSeed = useCallback(() => {
-    const t = input.trim();
+    const t = sanitiseInput(input);
     if (!t) return;
     const ns = { id: Date.now().toString(), text: t, category, riffs: [] };
     setSeeds(p => [ns, ...p]);
@@ -344,7 +357,7 @@ export default function RiffMachine() {
           items = Array.isArray(parsed) ? parsed : (parsed.categories || []);
         } catch {}
       }
-      if (items.length === 0) throw new Error("No resources found \— try riffing again");
+      if (items.length === 0) throw new Error("No resources found — try riffing again");
       setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [...(s.riffs || []), ...items] } : s));
       setStreamItems([]);
     } catch (e) {
@@ -408,7 +421,7 @@ export default function RiffMachine() {
   }, [seeds, syntheses]);
 
   const handleReset = useCallback(() => {
-    if (!window.confirm("Clear all seeds, riffs, and syntheses? This can\’t be undone.")) return;
+    if (!window.confirm("Clear all seeds, riffs, and syntheses? This can’t be undone.")) return;
     setSeeds([]);
     setSyntheses([]);
     setSelectedId(null);
@@ -466,7 +479,7 @@ export default function RiffMachine() {
                 <input ref={inputRef} value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && addSeed()}
-                  placeholder="Enter a seed idea\…"
+                  placeholder="Enter a seed idea…"
                   style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit", minHeight: 44, minWidth: 0 }}
                 />
                 <button onClick={addSeed} disabled={!input.trim()} style={{
@@ -490,7 +503,7 @@ export default function RiffMachine() {
                   <input ref={inputRef} value={input}
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={e => e.key === "Enter" && addSeed()}
-                    placeholder="Enter a seed idea\…"
+                    placeholder="Enter a seed idea…"
                     style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }}
                   />
                   <button onClick={addSeed} disabled={!input.trim()} style={{
@@ -692,7 +705,7 @@ export default function RiffMachine() {
                 )}
                 {filtered.map((item, i) => <ResourceCard key={`${selected.id}-${i}-${item.title}`} item={item} index={i} />)}
                 {loading && filtered.length === 0 && (
-                  <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering\…"} <Dots /></div>
+                  <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering…"} <Dots /></div>
                 )}
               </div>
             </>
@@ -707,7 +720,7 @@ export default function RiffMachine() {
                 </div>
               )}
               {syntheses.map((syn, i) => <SynthesisCard key={i} syn={syn} index={i} />)}
-              {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing\…"} <Dots /></div>}
+              {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing…"} <Dots /></div>}
             </div>
           ) : null}
         </main>
