@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://riff-machine.vercel.app/sitemap.xml

@@ -127,7 +127,7 @@ function Dots() {
 
 function ResourceCard({ item, index }) {
   return (
-    <div style={{
+    <article style={{
       padding: "14px 16px", borderLeft: "3px solid #000", marginBottom: 10,
       background: "#fafafa", animation: `fadeUp 0.25s ease ${index * 0.04}s both`,
     }}>
@@ -146,16 +146,16 @@ function ResourceCard({ item, index }) {
       <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{item.desc || item.description}</div>
       {(item.link || item.connection) && (
         <div style={{ fontSize: 11.5, color: "#999", fontStyle: "italic", marginTop: 6 }}>
-          \u21B3 {item.link || item.connection}
+          {"\u21B3"} {item.link || item.connection}
         </div>
       )}
-    </div>
+    </article>
   );
 }
 
 function SynthesisCard({ syn, index }) {
   return (
-    <div style={{
+    <article style={{
       padding: "18px 20px", border: "2px solid #000", marginBottom: 14,
       background: "#fff", animation: `fadeUp 0.3s ease ${index * 0.08}s both`,
     }}>
@@ -172,7 +172,7 @@ function SynthesisCard({ syn, index }) {
         <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" \u00B7 ")}</div>
       )}
       {syn.leads?.map((lead, i) => <ResourceCard key={i} item={lead} index={i} />)}
-    </div>
+    </article>
   );
 }
 
@@ -383,7 +383,7 @@ export default function RiffMachine() {
       <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100vh", width: "100%", overflow: "hidden" }}>
 
         {/* ── Sidebar (desktop) / Top section (mobile) ── */}
-        <div style={isMobile
+        <nav style={isMobile
           ? { borderBottom: "1px solid #e0e0e0", flexShrink: 0 }
           : { width: 280, minWidth: 280, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", height: "100%" }
         }>
@@ -527,10 +527,10 @@ export default function RiffMachine() {
               }}>{copied ? "\u2713 Copied" : "\u2398 Copy MD"}</button>
             </div>
           </div>
-        </div>
+        </nav>
 
         {/* ── Main Panel ── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
           {/* Tab bar */}
           {(selected || syntheses.length > 0) && (
@@ -646,7 +646,7 @@ export default function RiffMachine() {
               {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>Synthesizing\u2026 <Dots /></div>}
             </div>
           ) : null}
-        </div>
+        </main>
       </div>
     </>
   );
