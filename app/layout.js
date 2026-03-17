@@ -1,18 +1,18 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Riff Machine \u2014 AI Creative Discovery Engine",
+  title: "Riff Machine - AI Creative Discovery Engine",
   description: "Enter seed ideas, discover unexpected connections across art, music, philosophy, finance, food, and more. Find real articles, songs, books, and people. Synthesize emergent themes. Export to Markdown for Substack and Medium.",
   keywords: ["creative discovery", "AI research tool", "idea generation", "cross-domain connections", "riff machine", "synthesis engine"],
   openGraph: {
-    title: "Riff Machine \u2014 AI Creative Discovery Engine",
+    title: "Riff Machine - AI Creative Discovery Engine",
     description: "Discover unexpected connections across art, music, philosophy, finance, and more. Powered by Claude.",
     type: "website",
     siteName: "Riff Machine",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Riff Machine \u2014 AI Creative Discovery Engine",
+    title: "Riff Machine - AI Creative Discovery Engine",
     description: "Discover unexpected connections across art, music, philosophy, finance, and more.",
   },
   robots: {
