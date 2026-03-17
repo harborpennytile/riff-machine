@@ -19,7 +19,7 @@ async function ld(){for(const k of[SK,"riffmachine:v4","riffmachine:v3","riffmac
 async function sv(s){try{await storage.set(SK,JSON.stringify(s))}catch{}}
 
 async function callAPI(system,userMsg,tools){
-  const r=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:MODEL,max_tokens:4000,stream:false,system,messages:[{role:"user",content:userMsg}],tools:tools||undefined})});
+  const r=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:MODEL,max_tokens:2500,stream:false,system,messages:[{role:"user",content:userMsg}],tools:tools||undefined})});
   if(!r.ok){const t=await r.text().catch(()=>"");throw new Error(t.includes("429")?"Rate limit reached. Wait a bit.":"API error "+r.status)}
   const d=await r.json();
   return d.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
@@ -38,14 +38,14 @@ function buildRiff(seed,all){
   }
   const cross=others.length>0?"\nCRITICAL: Every result MUST bridge the focused seed with at least one other seed. Name which seeds connect in the link field.":"\nFind diverse cross-domain resources.";
   return{
-    system:"You are a creative discovery engine.\n\nFocused on: \""+seed.text+"\" ["+seed.category+"]"+ctx+"\n\nReturn ONLY a JSON array of 4-5 items. No markdown fences.\n\nEach item: {\"type\":\"article|visual|music|book|concept|person\",\"title\":\"exact real title\",\"url\":\"https://real-url-from-search\",\"desc\":\"1-2 sentences\",\"link\":\"which seeds this bridges\"}\n\nRULES:\n- Use web_search to find a real URL for each resource. Every url must be genuine.\n- Do NOT fabricate URLs."+cross,
+    system:"You are a creative discovery engine.\n\nFocused on: \""+seed.text+"\" ["+seed.category+"]"+ctx+"\n\nReturn ONLY a JSON array of 4-5 items. No markdown fences.\n\nEach item: {\"type\":\"article|visual|music|book|concept|person\",\"title\":\"exact real title\",\"url\":\"https://real-url-from-search\",\"desc\":\"1-2 sentences\",\"link\":\"which seeds this bridges\"}\n\nRULES:\n- Use web_search to find a real URL for each resource. Every url must be genuine.\n- Do NOT fabricate URLs.\n- SPEED: Do at most 3 web searches total. Search for the most unique/specific items only. For well-known books, people, Wikipedia concepts, or famous artworks you can provide the URL from memory without searching.\n- If you cannot find a valid URL for an item, omit the url field entirely. A missing URL is fine. A fake URL is not."+cross,
     user:"Find resources connecting my seeds, focused on: \""+seed.text+"\""
   };
 }
 
 function buildSynth(seeds){
   return{
-    system:"Find cross-connections across seeds. Return ONLY a JSON array. No markdown.\n\nEach: {\"name\":\"theme\",\"insight\":\"2-3 sentences\",\"seeds\":[\"s1\",\"s2\"],\"leads\":[{\"type\":\"...\",\"title\":\"...\",\"url\":\"https://real-url\",\"desc\":\"...\"}]}\n\nUse web_search for real URLs in leads. 2-3 syntheses max.",
+    system:"Find cross-connections across seeds. Return ONLY a JSON array. No markdown.\n\nEach: {\"name\":\"theme\",\"insight\":\"2-3 sentences\",\"seeds\":[\"s1\",\"s2\"],\"leads\":[{\"type\":\"...\",\"title\":\"...\",\"url\":\"https://real-url\",\"desc\":\"...\"}]}\n\nUse web_search for real URLs in leads. 2-3 syntheses max.\n\nSPEED: Do at most 2 web searches for the leads. Use known URLs from memory where possible. Omit url if unsure rather than guessing.",
     user:"Seeds:\n"+JSON.stringify(seeds.map(s=>({seed:s.text,cat:s.category,resources:(s.riffs||[]).map(r=>({type:r.type,title:r.title}))})))
   };
 }
@@ -96,12 +96,14 @@ export default function RiffMachine(){
   const[ready,setReady]=useState(false);
   const[copied,setCopied]=useState(false);
   const[cd,setCd]=useState(0);
+  const[elapsed,setElapsed]=useState(0);
   const ref=useRef(null);
   const mob=useM();
 
   useEffect(()=>{ld().then(s=>{if(s){const m=(s.seeds||[]).map(sd=>{let r=sd.riffs||[];if(!Array.isArray(r))r=[];r=r.filter(x=>x&&typeof x==="object");return{...sd,category:sd.category||"art",riffs:r}});setSeeds(m);setSynths(s.syntheses||[]);if(s.selectedId)setSelId(s.selectedId)}setReady(true)})},[]);
   useEffect(()=>{if(ready)sv({seeds,selectedId:selId,syntheses:synths})},[seeds,selId,synths,ready]);
   useEffect(()=>{if(cd<=0)return;const t=setTimeout(()=>setCd(c=>c-1),1000);return()=>clearTimeout(t)},[cd]);
+  useEffect(()=>{if(!loading&&!sLoading){setElapsed(0);return}const t=setInterval(()=>setElapsed(e=>e+1),1000);return()=>clearInterval(t)},[loading,sLoading]);
 
   const sel=seeds.find(s=>s.id===selId);
   const swR=seeds.filter(s=>s.riffs?.length>0).length;
@@ -189,33 +191,50 @@ export default function RiffMachine(){
 
   const tabs=(
     <div style={{display:"flex",borderBottom:"1px solid #e0e0e0",flexShrink:0}}>
-      <button onClick={()=>setView("riffs")} style={{flex:1,padding:"10px",fontSize:12,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:"none",border:"none",borderBottom:view==="riffs"?"2px solid #000":"2px solid transparent",color:view==="riffs"?"#000":"#999",fontFamily:"inherit",cursor:"pointer",minHeight:40}}>Resources</button>
-      <button onClick={()=>setView("synthesis")} style={{flex:1,padding:"10px",fontSize:12,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:"none",border:"none",borderBottom:view==="synthesis"?"2px solid #000":"2px solid transparent",color:view==="synthesis"?"#000":"#999",fontFamily:"inherit",cursor:"pointer",minHeight:40}}>Synthesis</button>
+      <button onClick={()=>setView("riffs")} style={{flex:1,padding:"10px",fontSize:12,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:"none",border:"none",borderBottom:view==="riffs"?"2px solid #000":"2px solid transparent",color:view==="riffs"?"#000":"#999",fontFamily:"inherit",cursor:"pointer",minHeight:40,transition:"all 0.15s"}}>Resources</button>
+      <button onClick={()=>setView("synthesis")} style={{flex:1,padding:"10px",fontSize:12,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:"none",border:"none",borderBottom:view==="synthesis"?"2px solid #000":"2px solid transparent",color:view==="synthesis"?"#000":"#999",fontFamily:"inherit",cursor:"pointer",minHeight:40,transition:"all 0.15s"}}>Synthesis</button>
     </div>
   );
 
-  const results=(
-    <div style={{padding:"12px 16px"}}>
-      {err&&<div style={{padding:"8px 12px",background:"#fff5f5",border:"1px solid #fcc",color:"#c00",fontSize:12,marginBottom:10}}>{err}</div>}
-      {view==="riffs"&&sel?(
-        <>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
-            <div><span style={{fontSize:13}}>{ci(sel.category)}</span> <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#aaa"}}>{sel.category}</span><div style={{fontSize:15,fontWeight:600,marginTop:2}}>{sel.text}</div></div>
-            {riffs.length>0&&<div style={{display:"flex",gap:4}}><button onClick={expSeed} style={tb}>Export</button><button onClick={()=>cp(false)} style={tb}>{copied?"Done":"Copy"}</button><button onClick={clr} style={tb}>Clear</button></div>}
-          </div>
-          {types.length>2&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>{types.map(t=><button key={t} onClick={()=>setFilt(t)} style={{padding:"2px 8px",fontSize:11,fontWeight:600,background:filter===t?"#000":"#f5f5f5",color:filter===t?"#fff":"#666",border:"none",cursor:"pointer",fontFamily:"inherit"}}>{t==="all"?"All ("+riffs.length+")":(TI[t]||"")+" "+t}</button>)}</div>}
-          {filt.length===0&&!loading&&<div style={{color:"#bbb",fontSize:13,paddingTop:16,textAlign:"center"}}>Hit Riff to discover connections</div>}
-          {filt.map((item,i)=><Card key={sel.id+"-"+i} item={item} i={i}/>)}
-          {loading&&<div style={{textAlign:"center",padding:"16px 0",color:"#999",fontSize:13}}>Searching the web...</div>}
-        </>
-      ):view==="synthesis"?(
-        <>
-          {synths.length===0&&!sLoading&&<div style={{color:"#bbb",fontSize:13,paddingTop:16,textAlign:"center"}}>{swR<2?"Riff on 2+ seeds first":"Hit Synthesize"}</div>}
-          {synths.map((s,i)=><SCard key={i} syn={s} i={i}/>)}
-          {sLoading&&<div style={{textAlign:"center",padding:"16px 0",color:"#999",fontSize:13}}>Synthesizing...</div>}
-        </>
-      ):<div style={{color:"#bbb",fontSize:13,paddingTop:16,textAlign:"center"}}>Select a seed and hit Riff</div>}
+  const loadingBanner=(loading||sLoading)?(
+    <div style={{padding:"14px 16px",background:"#000",color:"#fff",fontSize:13,fontWeight:600,letterSpacing:"0.04em",display:"flex",alignItems:"center",gap:10,animation:"pulse 2s ease-in-out infinite"}}>
+      <span style={{width:8,height:8,borderRadius:"50%",background:"#fff",animation:"blink 1s ease-in-out infinite"}}/>
+      {loading?"Searching the web for connections..."+(elapsed>3?" ("+elapsed+"s)":""):"Synthesizing cross-connections..."+(elapsed>3?" ("+elapsed+"s)":"")}
     </div>
+  ):null;
+
+  const errBox=err?(
+    <div style={{padding:"8px 12px",background:"#fff5f5",border:"1px solid #fcc",color:"#c00",fontSize:12,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <span>{err}</span>
+      <button onClick={()=>setErr(null)} style={{background:"none",border:"none",color:"#c00",cursor:"pointer",fontSize:14,padding:"0 4px"}}>
+        <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.5" fill="none"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+      </button>
+    </div>
+  ):null;
+
+  const results=(
+    <>
+      {loadingBanner}
+      <div style={{padding:"12px 16px"}}>
+        {errBox}
+        {view==="riffs"&&sel?(
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
+              <div><span style={{fontSize:13}}>{ci(sel.category)}</span> <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:"#aaa"}}>{sel.category}</span><div style={{fontSize:15,fontWeight:600,marginTop:2}}>{sel.text}</div></div>
+              {riffs.length>0&&<div style={{display:"flex",gap:4}}><button onClick={expSeed} style={tb}>Export</button><button onClick={()=>cp(false)} style={tb}>{copied?"Done":"Copy"}</button><button onClick={clr} style={tb}>Clear</button></div>}
+            </div>
+            {types.length>2&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>{types.map(t=><button key={t} onClick={()=>setFilt(t)} style={{padding:"2px 8px",fontSize:11,fontWeight:600,background:filter===t?"#000":"#f5f5f5",color:filter===t?"#fff":"#666",border:"none",cursor:"pointer",fontFamily:"inherit"}}>{t==="all"?"All ("+riffs.length+")":(TI[t]||"")+" "+t}</button>)}</div>}
+            {filt.length===0&&!loading&&<div style={{color:"#bbb",fontSize:13,paddingTop:16,textAlign:"center"}}>Hit Riff to discover connections</div>}
+            {filt.map((item,i)=><Card key={sel.id+"-"+i} item={item} i={i}/>)}
+          </>
+        ):view==="synthesis"?(
+          <>
+            {synths.length===0&&!sLoading&&<div style={{color:"#bbb",fontSize:13,paddingTop:16,textAlign:"center"}}>{swR<2?"Riff on 2+ seeds first":"Hit Synthesize"}</div>}
+            {synths.map((s,i)=><SCard key={i} syn={s} i={i}/>)}
+          </>
+        ):<div style={{color:"#bbb",fontSize:13,paddingTop:16,textAlign:"center"}}>Select a seed and hit Riff</div>}
+      </div>
+    </>
   );
 
   /* ===== MOBILE: single scrollable column ===== */
@@ -226,7 +245,7 @@ export default function RiffMachine(){
         <div style={{padding:"12px 16px 4px"}}><div style={{fontSize:12,fontWeight:800,letterSpacing:"0.14em",textTransform:"uppercase"}}>Riff Machine</div><div style={{fontSize:11,color:"#999",marginTop:2}}>Pick a category, type an idea, hit Riff.</div></div>
         <div style={{padding:"6px 16px"}}>{catSelect}</div>
         <div style={{padding:"6px 16px"}}>{inputRow}</div>
-        {seeds.length>0&&<div style={{display:"flex",gap:6,padding:"8px 16px",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>{seeds.map(s=><button key={s.id} onClick={()=>{setSelId(s.id);setView("riffs");setFilt("all")}} style={{flexShrink:0,padding:"6px 12px",fontSize:12,background:s.id===selId?"#000":"#f0f0f0",color:s.id===selId?"#fff":"#000",border:"none",borderRadius:16,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",minHeight:32}}>{ci(s.category)} {s.text.length>15?s.text.slice(0,15)+"...":s.text}</button>)}</div>}
+        {seeds.length>0&&<div style={{display:"flex",gap:6,padding:"8px 16px",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>{seeds.map(s=><button key={s.id} onClick={()=>{setSelId(s.id);setView("riffs");setFilt("all")}} style={{flexShrink:0,padding:"6px 12px",fontSize:12,background:s.id===selId?"#000":"#f0f0f0",color:s.id===selId?"#fff":"#000",border:"none",borderRadius:16,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",minHeight:32,boxShadow:s.id===selId?"0 2px 8px rgba(0,0,0,0.2)":"none"}}>{ci(s.category)} {s.text.length>15?s.text.slice(0,15)+"...":s.text}</button>)}</div>}
         <div style={{padding:"8px 16px"}}>{actions}</div>
         {tabs}
         {results}
@@ -269,4 +288,4 @@ export default function RiffMachine(){
 }
 
 const tb={background:"none",border:"1px solid #ddd",padding:"3px 8px",fontSize:10,cursor:"pointer",color:"#666",fontFamily:"inherit"};
-const CSS=`*{box-sizing:border-box}::selection{background:#000;color:#fff}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}select:focus,input:focus{outline:1px solid #000}`;
+const CSS=`*{box-sizing:border-box}::selection{background:#000;color:#fff}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}select:focus,input:focus{outline:1px solid #000}article:hover{background:#f5f5f5 !important}@keyframes blink{0%,100%{opacity:0.3}50%{opacity:1}}@keyframes pulse{0%,100%{opacity:0.85}50%{opacity:1}}`;
