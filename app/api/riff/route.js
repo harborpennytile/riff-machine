@@ -2,10 +2,43 @@ import { NextResponse } from "next/server";
 
 export const runtime = "edge";
 
+// Simple in-memory rate limiter
+// In production, use Redis or Vercel KV. This resets on each cold start.
+const rateLimits = new Map();
+const RATE_LIMIT = 20;
+const RATE_WINDOW = 60 * 60 * 1000; // 1 hour
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimits.get(ip);
+
+  if (!entry || now - entry.start > RATE_WINDOW) {
+    rateLimits.set(ip, { start: now, count: 1 });
+    return { ok: true, remaining: RATE_LIMIT - 1 };
+  }
+
+  if (entry.count >= RATE_LIMIT) {
+    return { ok: false, remaining: 0 };
+  }
+
+  entry.count++;
+  return { ok: true, remaining: RATE_LIMIT - entry.count };
+}
+
 export async function POST(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
+  }
+
+  const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown";
+  const limit = checkRateLimit(ip);
+
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "Rate limit reached. Try again in an hour." },
+      { status: 429, headers: { "X-RateLimit-Remaining": "0" } }
+    );
   }
 
   let body;

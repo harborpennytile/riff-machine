@@ -253,6 +253,7 @@ export default function RiffMachine() {
   const [filter, setFilter] = useState("all");
   const [ready, setReady] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const inputRef = useRef(null);
   const isMobile = useIsMobile();
 
@@ -274,15 +275,22 @@ export default function RiffMachine() {
 
   useEffect(() => { if (ready) saveState({ seeds, selectedId, syntheses }); }, [seeds, selectedId, syntheses, ready]);
 
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
   const selected = seeds.find(s => s.id === selectedId);
   const seedsWithRiffs = seeds.filter(s => s.riffs?.length > 0).length;
 
   const addSeed = useCallback(() => {
+    if (seeds.length >= 20) { setError("Max 20 seeds. Delete some to add more."); return; }
     const t = sanitise(input); if (!t) return;
     const ns = { id: Date.now().toString(), text: t, category, riffs: [] };
     setSeeds(p => [ns, ...p]); setSelectedId(ns.id); setInput(""); setView("riffs"); setFilter("all");
     inputRef.current?.focus();
-  }, [input, category]);
+  }, [input, category, seeds.length]);
 
   const deleteSeed = useCallback(id => {
     setSeeds(prev => {
@@ -297,7 +305,9 @@ export default function RiffMachine() {
   }, [selectedId]);
 
   const riff = useCallback(async () => {
-    if (!selected || loading) return;
+    if (!selected || loading || cooldown > 0) return;
+    const current = selected.riffs?.length || 0;
+    if (current >= 25) { setError("Max 25 resources per seed. Clear some to discover more."); return; }
     setLoading(true); setError(null); setView("riffs");
     try {
       const { system, user } = buildRiffPrompt(selected, seeds);
@@ -313,12 +323,18 @@ export default function RiffMachine() {
       }
       if (!items.length) throw new Error("No resources found - try again");
       setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [...(s.riffs || []), ...items] } : s));
-    } catch (e) { setError(e.message); }
-    finally { setLoading(false); }
-  }, [selected, loading, seeds]);
+    } catch (e) {
+      if (e.message.includes("429")) {
+        setError("Rate limit reached. Please wait a bit before riffing again.");
+      } else {
+        setError(e.message);
+      }
+    }
+    finally { setLoading(false); setCooldown(10); }
+  }, [selected, loading, seeds, cooldown]);
 
   const synthesize = useCallback(async () => {
-    if (seeds.length < 2 || synthLoading) return;
+    if (seeds.length < 2 || synthLoading || cooldown > 0) return;
     const toSynth = seeds.filter(s => s.riffs?.length > 0);
     const useSeeds = toSynth.length >= 2 ? toSynth : seeds;
     setSynthLoading(true); setError(null); setView("synthesis");
@@ -335,9 +351,15 @@ export default function RiffMachine() {
         else throw new Error("Parse error");
       }
       setSyntheses(Array.isArray(parsed) ? parsed : (parsed.syntheses || []));
-    } catch (e) { setError(e.message); }
-    finally { setSynthLoading(false); }
-  }, [seeds, synthLoading]);
+    } catch (e) {
+      if (e.message.includes("429")) {
+        setError("Rate limit reached. Please wait a bit before riffing again.");
+      } else {
+        setError(e.message);
+      }
+    }
+    finally { setSynthLoading(false); setCooldown(10); }
+  }, [seeds, synthLoading, cooldown]);
 
   const clearRiffs = useCallback(() => { if (selected) setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [] } : s)); }, [selected]);
 
@@ -411,8 +433,8 @@ export default function RiffMachine() {
         {/* Actions */}
         <div style={{ padding: "8px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={riff} disabled={!selected || loading} style={{ flex: 1, padding: "12px", background: !selected || loading ? "#e8e8e8" : "#000", color: !selected || loading ? "#aaa" : "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", minHeight: 44 }}>{loading ? "..." : "RIFF"}</button>
-            <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{ flex: 1, padding: "12px", background: "transparent", color: seeds.length < 2 || synthLoading ? "#ccc" : "#000", border: "1px solid " + (seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"), fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", minHeight: 44 }}>{synthLoading ? "..." : "SYNTH"}</button>
+            <button onClick={riff} disabled={!selected || loading || cooldown > 0} style={{ flex: 1, padding: "12px", background: !selected || loading || cooldown > 0 ? "#e8e8e8" : "#000", color: !selected || loading || cooldown > 0 ? "#aaa" : "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", minHeight: 44 }}>{loading ? "..." : cooldown > 0 ? "RIFF (" + cooldown + ")" : "RIFF"}</button>
+            <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading || cooldown > 0} style={{ flex: 1, padding: "12px", background: "transparent", color: seeds.length < 2 || synthLoading || cooldown > 0 ? "#ccc" : "#000", border: "1px solid " + (seeds.length < 2 || synthLoading || cooldown > 0 ? "#e0e0e0" : "#000"), fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", minHeight: 44 }}>{synthLoading ? "..." : cooldown > 0 ? "SYNTH (" + cooldown + ")" : "SYNTH"}</button>
           </div>
           <div style={{ display: "flex", gap: 6 }}>
             <button onClick={doExportAll} style={{ flex: 1, padding: "10px", background: "none", border: "1px solid #ddd", fontSize: 12, fontFamily: "inherit", color: "#666", minHeight: 44 }}>Export All</button>
@@ -474,8 +496,8 @@ export default function RiffMachine() {
 
         {/* Actions - RIGHT BELOW seeds, not pinned to bottom */}
         <div style={{ padding: "10px 14px", borderTop: "1px solid #e0e0e0", display: "flex", flexDirection: "column", gap: 5 }}>
-          <button onClick={riff} disabled={!selected || loading} style={{ width: "100%", padding: "10px 14px", background: !selected || loading ? "#e8e8e8" : "#000", color: !selected || loading ? "#aaa" : "#fff", border: "none", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", cursor: !selected || loading ? "default" : "pointer" }}>{loading ? "..." : "RIFF"}</button>
-          <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{ width: "100%", padding: "10px 14px", background: "transparent", color: seeds.length < 2 || synthLoading ? "#ccc" : "#000", border: "1px solid " + (seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"), fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", cursor: seeds.length < 2 || synthLoading ? "default" : "pointer" }}>{synthLoading ? "..." : "SYNTHESIZE (" + seeds.length + ")"}</button>
+          <button onClick={riff} disabled={!selected || loading || cooldown > 0} style={{ width: "100%", padding: "10px 14px", background: !selected || loading || cooldown > 0 ? "#e8e8e8" : "#000", color: !selected || loading || cooldown > 0 ? "#aaa" : "#fff", border: "none", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", cursor: !selected || loading || cooldown > 0 ? "default" : "pointer" }}>{loading ? "..." : cooldown > 0 ? "RIFF (" + cooldown + ")" : "RIFF"}</button>
+          <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading || cooldown > 0} style={{ width: "100%", padding: "10px 14px", background: "transparent", color: seeds.length < 2 || synthLoading || cooldown > 0 ? "#ccc" : "#000", border: "1px solid " + (seeds.length < 2 || synthLoading || cooldown > 0 ? "#e0e0e0" : "#000"), fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", cursor: seeds.length < 2 || synthLoading || cooldown > 0 ? "default" : "pointer" }}>{synthLoading ? "..." : cooldown > 0 ? "SYNTHESIZE (" + cooldown + ")" : "SYNTHESIZE (" + seeds.length + ")"}</button>
           <div style={{ display: "flex", gap: 4 }}>
             <button onClick={doExportAll} disabled={seeds.length === 0} style={{ ...tinyBtn, flex: 1 }}>Export All</button>
             <button onClick={() => doCopy(true)} disabled={seeds.length === 0} style={{ ...tinyBtn, flex: 1 }}>{copied ? "Done" : "Copy MD"}</button>
