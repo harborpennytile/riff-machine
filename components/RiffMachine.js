@@ -9,11 +9,11 @@ const MODEL = process.env.NEXT_PUBLIC_ANTHROPIC_MODEL || "claude-sonnet-4-202505
 const STORAGE_KEY = "riffmachine:v3";
 
 const SEED_CATEGORIES = ["art", "music", "tech", "philosophy", "finance", "food", "nature", "news", "random", "other"];
-const ICONS = { article: "\u{1F4C4}", visual: "\u{1F5BC}", music: "\u{1F3B5}", book: "\u{1F4D6}", concept: "\u{1F4A1}", person: "\u{1F464}" };
-const CAT_ICONS = { art: "\u{1F3A8}", music: "\u{1F3B6}", tech: "\u26A1", philosophy: "\u{1F9E0}", finance: "\u{1F4B0}", food: "\u{1F373}", nature: "\u{1F33F}", news: "\u{1F4F0}", random: "\u{1F3B2}", other: "✦" };
+const ICONS = { article: "ART", visual: "VIS", music: "MUS", book: "BK", concept: "CON", person: "PER" };
+const CAT_ICONS = { art: "Art", music: "Mus", tech: "Tec", philosophy: "Phi", finance: "Fin", food: "Fod", nature: "Nat", news: "New", random: "Rnd", other: "Oth" };
 const TYPE_LABELS = { article: "Article", visual: "Visual", music: "Music", book: "Book", concept: "Concept", person: "Person" };
 
-/* ── Sanitisation ── */
+/* -- Sanitisation -- */
 function sanitiseInput(text) {
   return text
     .replace(/<[^>]*>/g, "")
@@ -25,7 +25,7 @@ function sanitiseInput(text) {
     .slice(0, 200);
 }
 
-/* ── Storage ── */
+/* --Storage --*/
 async function loadState() {
   for (const key of [STORAGE_KEY, "riffmachine:v2", "riffmachine:state"]) {
     try {
@@ -42,7 +42,7 @@ async function saveState(state) {
   try { await storage.set(STORAGE_KEY, JSON.stringify(state)); } catch {}
 }
 
-/* ── Streaming API ── */
+/* --Streaming API --*/
 async function streamAPI(system, userMsg, onChunk, signal) {
   const res = await fetch(API_URL, {
     method: "POST",
@@ -79,7 +79,7 @@ async function streamAPI(system, userMsg, onChunk, signal) {
   return fullText;
 }
 
-/* ── JSON extraction ── */
+/* --JSON extraction --*/
 function extractItems(text) {
   const items = [];
   const regex = /\{[^{}]*"type"\s*:\s*"[^"]+?"[^{}]*"title"\s*:\s*"[^"]*?"[^{}]*\}/g;
@@ -93,7 +93,7 @@ function extractItems(text) {
   return items;
 }
 
-/* ── Prompts ── */
+/* --Prompts --*/
 function riffPrompt(selectedSeed, allSeeds) {
   const seedText = selectedSeed.text;
   const category = selectedSeed.category;
@@ -157,7 +157,7 @@ RULES:
 
 function synthPrompt(seeds) {
   return {
-    system: `You find emergent cross-connections across multiple seed ideas. Return ONLY a JSON array of synthesis objects — no markdown, no backticks.
+    system: `You find emergent cross-connections across multiple seed ideas. Return ONLY a JSON array of synthesis objects -- no markdown, no backticks.
 
 Each: {"name":"theme name","insight":"2-3 sentences on the deep connection. Be SPECIFIC.","seeds":["seed1","seed2"],"refs":["resource title 1","resource title 2"],"leads":[{"type":"...","title":"...","desc":"...","search":"concise google search query to find this resource"}]}
 
@@ -174,7 +174,7 @@ RULES:
   };
 }
 
-/* ── Micro Components ── */
+/* --Micro Components --*/
 function Dots() {
   return (
     <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
@@ -193,7 +193,7 @@ function ResourceCard({ item, index }) {
       background: "#fafafa", animation: `fadeUp 0.25s ease ${index * 0.04}s both`,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
-        <span style={{ fontSize: 14 }}>{ICONS[item.type] || "\u{1F4CC}"}</span>
+        <span style={{ fontSize: 14 }}>{ICONS[item.type] || "--"}</span>
         <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#888" }}>
           {TYPE_LABELS[item.type] || item.type}
         </span>
@@ -205,7 +205,7 @@ function ResourceCard({ item, index }) {
       <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{item.desc || item.description}</div>
       {(item.link || item.connection) && (
         <div style={{ fontSize: 11.5, color: "#999", fontStyle: "italic", marginTop: 6 }}>
-          {"\u21B3"} {item.link || item.connection}
+          {">>"}{item.link || item.connection}
         </div>
       )}
     </article>
@@ -218,7 +218,7 @@ function SynthesisCard({ syn, index }) {
       padding: "18px 20px", border: "2px solid #000", marginBottom: 14,
       background: "#fff", animation: `fadeUp 0.3s ease ${index * 0.08}s both`,
     }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{"\u{1F517}"} {syn.name}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{">> "}{syn.name}</div>
       <div style={{ fontSize: 13.5, color: "#333", lineHeight: 1.65, marginBottom: 12 }}>{syn.insight}</div>
       {syn.seeds?.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
@@ -228,7 +228,7 @@ function SynthesisCard({ syn, index }) {
         </div>
       )}
       {syn.refs?.length > 0 && (
-        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" · ")}</div>
+        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" - ")}</div>
       )}
       {syn.leads?.map((lead, i) => <ResourceCard key={i} item={lead} index={i} />)}
     </article>
@@ -247,13 +247,13 @@ function SeedItem({ seed, isSelected, onClick, onDelete }) {
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 12, flexShrink: 0 }}>{CAT_ICONS[seed.category] || "\u25CF"}</span>
+          <span style={{ fontSize: 12, flexShrink: 0 }}>{CAT_ICONS[seed.category] || "*"}</span>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
             {seed.text}
           </span>
         </div>
         <div style={{ fontSize: 10.5, color: isSelected ? "#aaa" : "#999", marginTop: 2, paddingLeft: 22 }}>
-          {seed.category}{count > 0 ? ` · ${count} found` : ""}
+          {seed.category}{count > 0 ? ` - ${count} found` : ""}
         </div>
       </div>
       <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{
@@ -273,7 +273,7 @@ const smallBtn = (active = true) => ({
   transition: "all 0.1s",
 });
 
-/* ── Main App ── */
+/* --Main App --*/
 export default function RiffMachine() {
   const [seeds, setSeeds] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -365,7 +365,7 @@ export default function RiffMachine() {
           items = Array.isArray(parsed) ? parsed : (parsed.categories || []);
         } catch {}
       }
-      if (items.length === 0) throw new Error("No resources found — try riffing again");
+      if (items.length === 0) throw new Error("No resources found -- try riffing again");
       setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [...(s.riffs || []), ...items] } : s));
       setStreamItems([]);
     } catch (e) {
@@ -400,7 +400,7 @@ export default function RiffMachine() {
     setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [] } : s));
   }, [selected]);
 
-  /* ── Export handlers ── */
+  /* --Export handlers --*/
   const handleExportSeed = useCallback(() => {
     if (!selected) return;
     const md = exportSeedMarkdown(selected);
@@ -429,7 +429,7 @@ export default function RiffMachine() {
   }, [seeds, syntheses]);
 
   const handleReset = useCallback(() => {
-    if (!window.confirm("Clear all seeds, riffs, and syntheses? This can’t be undone.")) return;
+    if (!window.confirm("Clear all seeds, riffs, and syntheses? This cannot be undone.")) return;
     setSeeds([]);
     setSyntheses([]);
     setSelectedId(null);
@@ -449,14 +449,14 @@ export default function RiffMachine() {
     setFilter("all");
   }, []);
 
-  /* ── Shared content renderers ── */
+  /* --Shared content renderers --*/
   const renderRiffsContent = (padding) => (
     <>
       <div style={{ padding, borderBottom: "1px solid #f0f0f0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-              <span style={{ fontSize: 13 }}>{CAT_ICONS[selected.category] || "\u25CF"}</span>
+              <span style={{ fontSize: 13 }}>{CAT_ICONS[selected.category] || "*"}</span>
               <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#aaa" }}>
                 {selected.category}
               </span>
@@ -491,7 +491,7 @@ export default function RiffMachine() {
         )}
         {filtered.map((item, i) => <ResourceCard key={`${selected.id}-${i}-${item.title}`} item={item} index={i} />)}
         {loading && filtered.length === 0 && (
-          <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering\u2026"} <Dots /></div>
+          <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering..."} <Dots /></div>
         )}
       </div>
     </>
@@ -508,11 +508,11 @@ export default function RiffMachine() {
         </div>
       )}
       {syntheses.map((syn, i) => <SynthesisCard key={i} syn={syn} index={i} />)}
-      {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing\u2026"} <Dots /></div>}
+      {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing..."} <Dots /></div>}
     </div>
   );
 
-  /* ── MOBILE LAYOUT ── */
+  /* --MOBILE LAYOUT --*/
   if (isMobile) {
     return (
       <>
@@ -520,7 +520,7 @@ export default function RiffMachine() {
           .rm-seed-chips::-webkit-scrollbar { display: none; }
           .rm-seed-chips { -ms-overflow-style: none; scrollbar-width: none; }
         `}</style>
-        <div style={{ display: "flex", flexDirection: "column", height: "100vh", padding: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "100vh", height: "100dvh", width: "100%", fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", background: "#fff", color: "#000", overflow: "hidden" }}>
           {/* Header */}
           <div style={{ padding: "12px 16px 8px", flexShrink: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
@@ -531,12 +531,12 @@ export default function RiffMachine() {
             </div>
           </div>
 
-          {/* Category dropdown — full width */}
+          {/* Category dropdown -- full width */}
           <div style={{ padding: "0 16px 8px", flexShrink: 0 }}>
             <select value={category} onChange={e => setCategory(e.target.value)} style={{
-              width: "100%", padding: "10px 8px", border: "1px solid #ccc", borderRadius: 0,
-              fontSize: 13, fontFamily: "inherit", background: "#fff",
-              cursor: "pointer", appearance: "auto", minHeight: 44,
+              width: "100%", padding: "10px 12px", border: "1px solid #ccc", borderRadius: 0,
+              fontSize: 14, fontFamily: "inherit", background: "#fff",
+              cursor: "pointer", appearance: "auto", WebkitAppearance: "auto", minHeight: 44,
             }}>
               {SEED_CATEGORIES.map(c => (
                 <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
@@ -559,7 +559,7 @@ export default function RiffMachine() {
             }}>+</button>
           </div>
 
-          {/* Seed chips — horizontal scroll */}
+          {/* Seed chips -- horizontal scroll */}
           {seeds.length > 0 && (
             <div className="rm-seed-chips" style={{
               display: "flex", gap: 8, overflowX: "auto", padding: "8px 16px",
@@ -582,7 +582,7 @@ export default function RiffMachine() {
             </div>
           )}
 
-          {/* Action buttons — stacked vertically */}
+          {/* Action buttons -- stacked vertically */}
           <div style={{ padding: "8px 16px", display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
             <button onClick={riff} disabled={!selected || loading} style={{
               width: "100%", padding: "12px 14px", minHeight: 44,
@@ -640,8 +640,8 @@ export default function RiffMachine() {
             </div>
           )}
 
-          {/* Results area — takes remaining height */}
-          <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          {/* Results area -- takes remaining height */}
+          <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", WebkitOverflowScrolling: "touch" }}>
             {!selected && view !== "synthesis" ? (
               <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>
                 Select a seed and hit Riff
@@ -657,7 +657,7 @@ export default function RiffMachine() {
     );
   }
 
-  /* ── DESKTOP LAYOUT ── */
+  /* --DESKTOP LAYOUT --*/
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       {/* Sidebar */}
@@ -682,7 +682,7 @@ export default function RiffMachine() {
             <input ref={inputRef} value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && addSeed()}
-              placeholder="Enter a seed idea\u2026"
+              placeholder="Enter a seed idea..."
               style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }}
             />
             <button onClick={addSeed} disabled={!input.trim()} style={{
