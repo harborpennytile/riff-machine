@@ -46,31 +46,26 @@ async function loadState() {
 }
 async function saveState(s) { try { await storage.set(STORAGE_KEY, JSON.stringify(s)); } catch {} }
 
-/* -- Streaming -- */
-async function streamAPI(system, userMsg, onChunk, signal) {
+/* -- API -- */
+async function callAPI(system, userMsg, tools) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: 2000, stream: true, system, messages: [{ role: "user", content: userMsg }] }),
-    signal,
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 4000,
+      stream: false,
+      system,
+      messages: [{ role: "user", content: userMsg }],
+      tools: tools || undefined,
+    }),
   });
   if (!res.ok) throw new Error("API error " + res.status);
-  const reader = res.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "", full = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    const lines = buf.split("\n"); buf = lines.pop() || "";
-    for (const ln of lines) {
-      if (!ln.startsWith("data: ")) continue;
-      const d = ln.slice(6).trim();
-      if (d === "[DONE]") continue;
-      try { const e = JSON.parse(d); if (e.type === "content_block_delta" && e.delta?.text) { full += e.delta.text; onChunk(full); } } catch {}
-    }
-  }
-  return full;
+  const data = await res.json();
+  return data.content
+    .filter(b => b.type === "text")
+    .map(b => b.text)
+    .join("\n");
 }
 
 function extractItems(text) {
@@ -106,10 +101,11 @@ The user is focused on: "${seed.text}" [${seed.category}]${ctx}
 
 Return ONLY a JSON array of 4-5 items. No markdown, no backticks, no wrapper.
 
-Each item: {"type":"article|visual|music|book|concept|person","title":"Specific real title","search":"precise Google search query to find this exact resource","desc":"1-2 sentences on how this connects multiple seeds","link":"Which seeds this bridges and how"}
+Each item: {"type":"article|visual|music|book|concept|person","title":"Exact title of the real resource you found","url":"https://actual-url-from-your-search","desc":"1-2 sentences on how this connects multiple seeds","link":"Which seeds this bridges and how"}
 
 RULES:
-- Do NOT include a "url" field. Include a "search" field with a precise search query (e.g. "John Cage Atlas Eclipticalis mushroom foraging composition" not just "John Cage").
+- You MUST use web_search to find a real URL for each resource. Every url must be a genuine working link from search results.
+- Do NOT guess or fabricate URLs. Search and use the actual URL you find.
 - The title must be a real, specific work, article, book, song, person, or concept.
 - Keep descriptions to 1-2 sentences.${crossRule}
 - Be surprising. Find oblique, non-obvious connections.`,
@@ -121,9 +117,9 @@ function buildSynthPrompt(seeds) {
   return {
     system: `You find emergent cross-connections across seed ideas. Return ONLY a JSON array. No markdown, no backticks.
 
-Each: {"name":"theme","insight":"2-3 specific sentences","seeds":["seed1","seed2"],"refs":["resource title"],"leads":[{"type":"...","title":"...","search":"google search query","desc":"..."}]}
+Each: {"name":"theme","insight":"2-3 specific sentences","seeds":["seed1","seed2"],"refs":["resource title"],"leads":[{"type":"...","title":"...","url":"https://actual-url","desc":"..."}]}
 
-RULES: 2-3 syntheses. Each connects 2+ seeds. Leads are NEW resources no single seed would find. Be specific. No url field, use search field instead.`,
+RULES: 2-3 syntheses. Each connects 2+ seeds. Leads are NEW resources no single seed would find. Be specific. Use web_search to find real URLs for each lead.`,
     user: `Seeds:\n${JSON.stringify(seeds.map(s => ({ seed: s.text, cat: s.category, resources: (s.riffs || []).map(r => ({ type: r.type, title: r.title, desc: r.desc })) })), null, 1)}`,
   };
 }
@@ -137,20 +133,6 @@ function useIsMobile(bp = 768) {
 
 /* -- Shared Sub-Components -- */
 
-function SearchLink({ title, search }) {
-  const q = search || title;
-  const href = "https://www.google.com/search?q=" + encodeURIComponent(q);
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontWeight: 600 }}>{title}</span>
-      <a href={href} target="_blank" rel="noopener noreferrer nofollow" title={"Search: " + q}
-        style={{ color: "#999", fontSize: 11, textDecoration: "none", border: "1px solid #ddd", borderRadius: 3, padding: "1px 6px", whiteSpace: "nowrap" }}>
-        search
-      </a>
-    </span>
-  );
-}
-
 function ResourceCard({ item, idx }) {
   return (
     <article style={{ padding: "14px 16px", borderLeft: "3px solid #000", marginBottom: 10, background: "#fafafa", animation: "fadeUp 0.25s ease " + (idx * 0.04) + "s both" }}>
@@ -159,7 +141,14 @@ function ResourceCard({ item, idx }) {
         <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#888" }}>{item.type}</span>
       </div>
       <div style={{ fontSize: 14.5, marginBottom: 5, lineHeight: 1.3 }}>
-        <SearchLink title={item.title} search={item.search} />
+        {item.url ? (
+          <a href={item.url} target="_blank" rel="noopener noreferrer nofollow"
+            style={{ color: "#000", textDecoration: "underline", textUnderlineOffset: 2, fontWeight: 600 }}>
+            {item.title}
+          </a>
+        ) : (
+          <span style={{ fontWeight: 600 }}>{item.title}</span>
+        )}
       </div>
       <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{item.desc || item.description || ""}</div>
       {(item.link || item.connection) && (
@@ -259,14 +248,12 @@ export default function RiffMachine() {
   const [category, setCategory] = useState("art");
   const [loading, setLoading] = useState(false);
   const [synthLoading, setSynthLoading] = useState(false);
-  const [streamItems, setStreamItems] = useState([]);
   const [error, setError] = useState(null);
   const [view, setView] = useState("riffs");
   const [filter, setFilter] = useState("all");
   const [ready, setReady] = useState(false);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef(null);
-  const abortRef = useRef(null);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -311,29 +298,42 @@ export default function RiffMachine() {
 
   const riff = useCallback(async () => {
     if (!selected || loading) return;
-    setLoading(true); setError(null); setView("riffs"); setStreamItems([]);
-    abortRef.current = new AbortController();
+    setLoading(true); setError(null); setView("riffs");
     try {
       const { system, user } = buildRiffPrompt(selected, seeds);
-      const full = await streamAPI(system, user, p => setStreamItems(extractItems(p)), abortRef.current.signal);
-      let items = extractItems(full);
-      if (!items.length) { try { items = JSON.parse(full.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim()); if (!Array.isArray(items)) items = items.categories || []; } catch { items = []; } }
+      const tools = [{ type: "web_search_20250305", name: "web_search" }];
+      const fullText = await callAPI(system, user, tools);
+      let items = extractItems(fullText);
+      if (!items.length) {
+        try {
+          const cleaned = fullText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+          const parsed = JSON.parse(cleaned);
+          items = Array.isArray(parsed) ? parsed : [];
+        } catch {}
+      }
       if (!items.length) throw new Error("No resources found - try again");
       setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [...(s.riffs || []), ...items] } : s));
-      setStreamItems([]);
-    } catch (e) { if (e.name !== "AbortError") setError(e.message); }
+    } catch (e) { setError(e.message); }
     finally { setLoading(false); }
   }, [selected, loading, seeds]);
 
   const synthesize = useCallback(async () => {
     if (seeds.length < 2 || synthLoading) return;
     const toSynth = seeds.filter(s => s.riffs?.length > 0);
-    const input = toSynth.length >= 2 ? toSynth : seeds;
+    const useSeeds = toSynth.length >= 2 ? toSynth : seeds;
     setSynthLoading(true); setError(null); setView("synthesis");
     try {
-      const { system, user } = buildSynthPrompt(input);
-      const full = await streamAPI(system, user, () => {}, new AbortController().signal);
-      let parsed; try { parsed = JSON.parse(full.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim()); } catch { const m = full.match(/\[[\s\S]*\]/); if (m) parsed = JSON.parse(m[0]); else throw new Error("Parse error"); }
+      const { system, user } = buildSynthPrompt(useSeeds);
+      const tools = [{ type: "web_search_20250305", name: "web_search" }];
+      const fullText = await callAPI(system, user, tools);
+      let parsed;
+      try {
+        parsed = JSON.parse(fullText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim());
+      } catch {
+        const m = fullText.match(/\[[\s\S]*\]/);
+        if (m) parsed = JSON.parse(m[0]);
+        else throw new Error("Parse error");
+      }
       setSyntheses(Array.isArray(parsed) ? parsed : (parsed.syntheses || []));
     } catch (e) { setError(e.message); }
     finally { setSynthLoading(false); }
@@ -357,7 +357,7 @@ export default function RiffMachine() {
 
   // Derived
   const committed = selected?.riffs || [];
-  const displayRiffs = loading ? [...committed, ...streamItems] : committed;
+  const displayRiffs = committed;
   const types = ["all", ...new Set(displayRiffs.map(r => r.type).filter(Boolean))];
   const filtered = filter === "all" ? displayRiffs : displayRiffs.filter(r => r.type === filter);
 

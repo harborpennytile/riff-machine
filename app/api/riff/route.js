@@ -22,8 +22,20 @@ export async function POST(req) {
     content: typeof msg.content === "string" ? msg.content.slice(0, 10000) : String(msg.content).slice(0, 10000),
   }));
 
-  const sanitisedSystem = typeof body.system === "string" ? body.system.slice(0, 5000) : "";
+  const sanitisedSystem = typeof body.system === "string" ? body.system.slice(0, 8000) : "";
   const maxTokens = Math.min(Number(body.max_tokens) || 2000, 4000);
+
+  const apiBody = {
+    model: body.model || "claude-sonnet-4-20250514",
+    max_tokens: maxTokens,
+    stream: body.stream || false,
+    system: sanitisedSystem,
+    messages: sanitisedMessages,
+  };
+
+  if (body.tools) {
+    apiBody.tools = body.tools;
+  }
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -32,13 +44,7 @@ export async function POST(req) {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({
-      model: body.model || "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      stream: body.stream || false,
-      system: sanitisedSystem,
-      messages: sanitisedMessages,
-    }),
+    body: JSON.stringify(apiBody),
   });
 
   if (!res.ok) {
