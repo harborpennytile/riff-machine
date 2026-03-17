@@ -126,10 +126,10 @@ ${seedList}${prevResources}
 
 Return ONLY a JSON array of 4-5 resources. Each resource MUST connect to the focused seed AND at least one other seed. No resource should only relate to a single seed.
 
-Each item: {"type":"article|visual|music|book|concept|person","title":"...","url":"https://...","desc":"1-2 sentences explaining how this connects MULTIPLE seeds together","link":"Names which 2+ seeds this bridges and how"}
+Each item: {"type":"article|visual|music|book|concept|person","title":"...","desc":"1-2 sentences explaining how this connects MULTIPLE seeds together","link":"Names which 2+ seeds this bridges and how","search":"concise google search query to find this resource"}
 
 RULES:
-- Real URLs from known domains (wikipedia, youtube, spotify, arxiv, goodreads, guardian, nytimes, etc)
+- Do NOT include a url field. Instead include a "search" field with a short, specific Google search query that would find this exact resource (e.g. "John Cage mushroom music atlas eclipticalis" not just "John Cage").
 - Every result MUST bridge 2+ seeds. If it only relates to one seed, don't include it.
 - The "link" field must explicitly name which seeds are connected, e.g. "Bridges 'apple' and 'Miro' through..."
 - Be surprising. The value is in connections humans wouldn't make.
@@ -138,10 +138,10 @@ RULES:
 
   const singleSeedSystem = `You are a discovery engine. Given a seed idea in the "${category}" domain, find 4-5 REAL specific resources. Return ONLY a JSON array -- no markdown, no backticks, no wrapper object.
 
-Each item: {"type":"article|visual|music|book|concept|person","title":"...","url":"https://...","desc":"1-2 sentences on why this connects","link":"how it relates to another item here"}
+Each item: {"type":"article|visual|music|book|concept|person","title":"...","desc":"1-2 sentences on why this connects","link":"how it relates to another item here","search":"concise google search query to find this resource"}
 
 RULES:
-- Real URLs from known domains (wikipedia, youtube, spotify, arxiv, goodreads, guardian, nytimes, etc)
+- Do NOT include a url field. Instead include a "search" field with a short, specific Google search query that would find this exact resource (e.g. "John Cage mushroom music atlas eclipticalis" not just "John Cage").
 - The "${category}" lens should shape your picks -- find resources that speak to this seed THROUGH ${category}
 - Be surprising. Skip the obvious. Find oblique, cross-domain connections.
 - Keep descriptions SHORT. 1-2 sentences max.
@@ -159,12 +159,13 @@ function synthPrompt(seeds) {
   return {
     system: `You find emergent cross-connections across multiple seed ideas. Return ONLY a JSON array of synthesis objects — no markdown, no backticks.
 
-Each: {"name":"theme name","insight":"2-3 sentences on the deep connection. Be SPECIFIC.","seeds":["seed1","seed2"],"refs":["resource title 1","resource title 2"],"leads":[{"type":"...","title":"...","url":"https://...","desc":"..."}]}
+Each: {"name":"theme name","insight":"2-3 sentences on the deep connection. Be SPECIFIC.","seeds":["seed1","seed2"],"refs":["resource title 1","resource title 2"],"leads":[{"type":"...","title":"...","desc":"...","search":"concise google search query to find this resource"}]}
 
 RULES:
 - 2-3 syntheses max
 - Each connects 2+ seeds
 - leads are NEW resources no single seed would find
+- Do NOT include a url field in leads. Instead include a "search" field with a short, specific Google search query.
 - Be specific not vague
 - Return ONLY the JSON array`,
     user: `Seeds and resources:\n${JSON.stringify(seeds.map(s => ({
@@ -183,7 +184,9 @@ function Dots() {
 }
 
 function ResourceCard({ item, index }) {
-  const safeUrl = item.url && item.url.startsWith("https://") ? item.url : null;
+  const searchUrl = item.search
+    ? `https://www.google.com/search?q=${encodeURIComponent(item.search)}`
+    : `https://www.google.com/search?q=${encodeURIComponent(item.title)}`;
   return (
     <article style={{
       padding: "14px 16px", borderLeft: "3px solid #000", marginBottom: 10,
@@ -196,10 +199,8 @@ function ResourceCard({ item, index }) {
         </span>
       </div>
       <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 5, lineHeight: 1.3 }}>
-        {safeUrl ? (
-          <a href={safeUrl} target="_blank" rel="noopener noreferrer nofollow"
-            style={{ color: "#000", textDecoration: "underline", textUnderlineOffset: 2 }}>{item.title}</a>
-        ) : item.title}
+        <a href={searchUrl} target="_blank" rel="noopener noreferrer nofollow"
+          style={{ color: "#000", textDecoration: "underline", textUnderlineOffset: 2 }}>{item.title}</a>
       </div>
       <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{item.desc || item.description}</div>
       {(item.link || item.connection) && (
@@ -336,8 +337,15 @@ export default function RiffMachine() {
   }, [input, category]);
 
   const deleteSeed = useCallback(id => {
-    setSeeds(p => p.filter(s => s.id !== id));
-    if (selectedId === id) setSelectedId(null);
+    setSeeds(prev => {
+      const updated = prev.filter(s => s.id !== id);
+      if (selectedId === id) {
+        const oldIndex = prev.findIndex(s => s.id === id);
+        const nextSeed = updated[Math.min(oldIndex, updated.length - 1)];
+        setSelectedId(nextSeed?.id || null);
+      }
+      return updated;
+    });
   }, [selectedId]);
 
   const riff = useCallback(async () => {
@@ -441,290 +449,344 @@ export default function RiffMachine() {
     setFilter("all");
   }, []);
 
-  return (
+  /* ── Shared content renderers ── */
+  const renderRiffsContent = (padding) => (
     <>
-      <style>{`
-        @media (max-width: 767px) {
+      <div style={{ padding, borderBottom: "1px solid #f0f0f0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+              <span style={{ fontSize: 13 }}>{CAT_ICONS[selected.category] || "\u25CF"}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#aaa" }}>
+                {selected.category}
+              </span>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{selected.text}</div>
+          </div>
+          {committedRiffs.length > 0 && (
+            <button onClick={clearRiffs} style={smallBtn()}>Clear</button>
+          )}
+        </div>
+      </div>
+      {types.length > 2 && (
+        <div style={{ padding, display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid #f0f0f0" }}>
+          {types.map(t => (
+            <button key={t} onClick={() => setFilter(t)} style={{
+              padding: "3px 9px", fontSize: 11, fontWeight: 600,
+              background: filter === t ? "#000" : "#f5f5f5",
+              color: filter === t ? "#fff" : "#666",
+              border: "none", cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize",
+            }}>{t === "all" ? `All (${displayRiffs.length})` : `${ICONS[t] || ""} ${t}`}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ flex: 1, overflowY: "auto", padding }}>
+        {error && (
+          <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>{error}</div>
+        )}
+        {filtered.length === 0 && !loading && (
+          <div style={{ color: "#bbb", fontSize: 13, paddingTop: 24, textAlign: "center" }}>
+            Hit Riff to discover resources through the {selected.category} lens
+          </div>
+        )}
+        {filtered.map((item, i) => <ResourceCard key={`${selected.id}-${i}-${item.title}`} item={item} index={i} />)}
+        {loading && filtered.length === 0 && (
+          <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering\u2026"} <Dots /></div>
+        )}
+      </div>
+    </>
+  );
+
+  const renderSynthesisContent = (padding) => (
+    <div style={{ flex: 1, overflowY: "auto", padding }}>
+      {error && (
+        <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>{error}</div>
+      )}
+      {syntheses.length === 0 && !synthLoading && (
+        <div style={{ color: "#bbb", fontSize: 13, paddingTop: 24, textAlign: "center", lineHeight: 1.7 }}>
+          {seedsWithRiffs < 2 ? "Riff on 2+ seeds, then Synthesize" : "Hit Synthesize to find cross-connections"}
+        </div>
+      )}
+      {syntheses.map((syn, i) => <SynthesisCard key={i} syn={syn} index={i} />)}
+      {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing\u2026"} <Dots /></div>}
+    </div>
+  );
+
+  /* ── MOBILE LAYOUT ── */
+  if (isMobile) {
+    return (
+      <>
+        <style>{`
           .rm-seed-chips::-webkit-scrollbar { display: none; }
           .rm-seed-chips { -ms-overflow-style: none; scrollbar-width: none; }
-        }
-      `}</style>
-      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100vh", width: "100%", overflow: "hidden" }}>
-
-        {/* ── Sidebar (desktop) / Top section (mobile) ── */}
-        <nav style={isMobile
-          ? { borderBottom: "1px solid #e0e0e0", flexShrink: 0 }
-          : { width: 280, minWidth: 280, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", height: "100%" }
-        }>
-          {/* Title + Input */}
-          <div style={{ padding: isMobile ? "12px 12px 8px" : "16px 12px 12px", borderBottom: isMobile ? "none" : "1px solid #e0e0e0" }}>
+        `}</style>
+        <div style={{ display: "flex", flexDirection: "column", height: "100vh", padding: 0 }}>
+          {/* Header */}
+          <div style={{ padding: "12px 16px 8px", flexShrink: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
               Riff Machine
             </div>
-            <div style={{ fontSize: 12, color: "#999", fontWeight: 400, marginBottom: isMobile ? 8 : 12 }}>
+            <div style={{ fontSize: 12, color: "#999", fontWeight: 400, marginBottom: 8 }}>
               Pick a category, type an idea, hit Riff.
             </div>
-
-            {isMobile ? (
-              <div style={{ display: "flex", gap: 5 }}>
-                <select value={category} onChange={e => setCategory(e.target.value)} style={{
-                  padding: "7px 4px", border: "1px solid #ccc", borderRadius: 0,
-                  fontSize: 13, fontFamily: "inherit", background: "#fff",
-                  cursor: "pointer", appearance: "auto", minHeight: 44, width: 52,
-                }}>
-                  {SEED_CATEGORIES.map(c => (
-                    <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
-                  ))}
-                </select>
-                <input ref={inputRef} value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && addSeed()}
-                  placeholder="Enter a seed idea…"
-                  style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit", minHeight: 44, minWidth: 0 }}
-                />
-                <button onClick={addSeed} disabled={!input.trim()} style={{
-                  padding: "7px 11px", background: input.trim() ? "#000" : "#ddd",
-                  color: "#fff", border: "none", fontSize: 14, cursor: input.trim() ? "pointer" : "default",
-                  fontFamily: "inherit", fontWeight: 600, minHeight: 44,
-                }}>+</button>
-              </div>
-            ) : (
-              <>
-                <select value={category} onChange={e => setCategory(e.target.value)} style={{
-                  width: "100%", padding: "7px 8px", marginBottom: 8,
-                  border: "1px solid #ccc", borderRadius: 0, fontSize: 13,
-                  fontFamily: "inherit", background: "#fff", cursor: "pointer", appearance: "auto",
-                }}>
-                  {SEED_CATEGORIES.map(c => (
-                    <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
-                  ))}
-                </select>
-                <div style={{ display: "flex", gap: 5 }}>
-                  <input ref={inputRef} value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && addSeed()}
-                    placeholder="Enter a seed idea…"
-                    style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }}
-                  />
-                  <button onClick={addSeed} disabled={!input.trim()} style={{
-                    padding: "7px 11px", background: input.trim() ? "#000" : "#ddd",
-                    color: "#fff", border: "none", fontSize: 14, cursor: input.trim() ? "pointer" : "default",
-                    fontFamily: "inherit", fontWeight: 600,
-                  }}>+</button>
-                </div>
-              </>
-            )}
           </div>
 
-          {/* Seeds list */}
-          {isMobile ? (
-            seeds.length > 0 && (
-              <div className="rm-seed-chips" style={{
-                display: "flex", gap: 6, padding: "8px 12px",
-                overflowX: "auto",
-              }}>
-                {seeds.map(seed => (
-                  <button key={seed.id}
-                    onClick={() => selectSeed(seed.id)}
-                    style={{
-                      padding: "8px 14px", fontSize: 12, whiteSpace: "nowrap",
-                      background: seed.id === selectedId ? "#000" : "#f5f5f5",
-                      color: seed.id === selectedId ? "#fff" : "#000",
-                      border: "none", borderRadius: 20, cursor: "pointer",
-                      minHeight: 44, display: "flex", alignItems: "center", gap: 5,
-                      flexShrink: 0, fontFamily: "inherit", fontWeight: 500,
-                    }}
-                  >
-                    <span style={{ fontSize: 12 }}>{CAT_ICONS[seed.category] || "\u25CF"}</span>
-                    <span style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {seed.text}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )
-          ) : (
-            <div style={{ flex: 1, overflowY: "auto" }}>
+          {/* Category dropdown — full width */}
+          <div style={{ padding: "0 16px 8px", flexShrink: 0 }}>
+            <select value={category} onChange={e => setCategory(e.target.value)} style={{
+              width: "100%", padding: "10px 8px", border: "1px solid #ccc", borderRadius: 0,
+              fontSize: 13, fontFamily: "inherit", background: "#fff",
+              cursor: "pointer", appearance: "auto", minHeight: 44,
+            }}>
+              {SEED_CATEGORIES.map(c => (
+                <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Input + add button */}
+          <div style={{ display: "flex", gap: 6, padding: "0 16px 8px", flexShrink: 0 }}>
+            <input ref={inputRef} value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addSeed()}
+              placeholder="Enter a seed idea..."
+              style={{ flex: 1, padding: "10px 12px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit", minHeight: 44, minWidth: 0 }}
+            />
+            <button onClick={addSeed} disabled={!input.trim()} style={{
+              padding: "10px 14px", background: input.trim() ? "#000" : "#ddd",
+              color: "#fff", border: "none", fontSize: 14, cursor: input.trim() ? "pointer" : "default",
+              fontFamily: "inherit", fontWeight: 600, minHeight: 44,
+            }}>+</button>
+          </div>
+
+          {/* Seed chips — horizontal scroll */}
+          {seeds.length > 0 && (
+            <div className="rm-seed-chips" style={{
+              display: "flex", gap: 8, overflowX: "auto", padding: "8px 16px",
+              WebkitOverflowScrolling: "touch", borderBottom: "1px solid #e0e0e0", flexShrink: 0,
+            }}>
               {seeds.map(seed => (
-                <SeedItem key={seed.id} seed={seed} isSelected={seed.id === selectedId}
-                  onClick={() => selectSeed(seed.id)}
-                  onDelete={() => deleteSeed(seed.id)} />
+                <button key={seed.id} onClick={() => selectSeed(seed.id)} style={{
+                  flexShrink: 0, padding: "8px 14px", fontSize: 13,
+                  background: seed.id === selectedId ? "#000" : "#f0f0f0",
+                  color: seed.id === selectedId ? "#fff" : "#000",
+                  border: "none", borderRadius: 20, cursor: "pointer",
+                  whiteSpace: "nowrap", fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: 4,
+                  minHeight: 44,
+                }}>
+                  <span>{CAT_ICONS[seed.category]}</span>
+                  <span>{seed.text.length > 20 ? seed.text.slice(0, 20) + "..." : seed.text}</span>
+                </button>
               ))}
             </div>
           )}
 
-          {/* Action buttons */}
-          <div style={{
-            padding: 10,
-            borderTop: isMobile ? "none" : "1px solid #e0e0e0",
-            display: "flex",
-            flexDirection: isMobile ? "row" : "column",
-            gap: 5,
-            flexWrap: isMobile ? "wrap" : "nowrap",
-          }}>
+          {/* Action buttons — stacked vertically */}
+          <div style={{ padding: "8px 16px", display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
             <button onClick={riff} disabled={!selected || loading} style={{
-              flex: isMobile ? "1 1 45%" : undefined,
-              width: isMobile ? undefined : "100%",
-              padding: "10px 14px",
+              width: "100%", padding: "12px 14px", minHeight: 44,
               background: !selected || loading ? "#e8e8e8" : "#000",
               color: !selected || loading ? "#aaa" : "#fff",
               border: "none", fontSize: 12, fontWeight: 700,
               letterSpacing: "0.08em", textTransform: "uppercase",
               cursor: !selected || loading ? "default" : "pointer", fontFamily: "inherit",
-              minHeight: isMobile ? 44 : undefined,
             }}>{loading ? <Dots /> : "Riff"}</button>
 
             <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{
-              flex: isMobile ? "1 1 45%" : undefined,
-              width: isMobile ? undefined : "100%",
-              padding: "10px 14px", background: "transparent",
+              width: "100%", padding: "12px 14px", minHeight: 44, background: "transparent",
               color: seeds.length < 2 || synthLoading ? "#ccc" : "#000",
               border: `1px solid ${seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"}`,
               fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
               cursor: seeds.length < 2 || synthLoading ? "default" : "pointer", fontFamily: "inherit",
-              minHeight: isMobile ? 44 : undefined,
             }}>{synthLoading ? <Dots /> : `Synthesize${seeds.length >= 2 ? ` (${seeds.length})` : ""}`}</button>
 
-            <div style={{ display: "flex", gap: 4, marginTop: 2, flex: isMobile ? "1 1 100%" : undefined }}>
+            <div style={{ display: "flex", gap: 6 }}>
               <button onClick={handleExportAll} disabled={seeds.length === 0} style={{
-                ...smallBtn(seeds.length > 0), flex: 1, minHeight: isMobile ? 44 : undefined,
+                ...smallBtn(seeds.length > 0), flex: 1, minHeight: 44,
               }}>Export All</button>
               <button onClick={handleCopyAll} disabled={seeds.length === 0} style={{
-                ...smallBtn(seeds.length > 0), flex: 1, minHeight: isMobile ? 44 : undefined,
+                ...smallBtn(seeds.length > 0), flex: 1, minHeight: 44,
               }}>{copied ? "Copied!" : "Copy MD"}</button>
             </div>
+
             <button onClick={handleReset} style={{
               background: "none", border: "none", padding: "4px 0",
               fontSize: 11, color: "#bbb", textTransform: "uppercase",
               letterSpacing: "0.06em", cursor: "pointer", fontFamily: "inherit",
-              marginTop: 8, textAlign: "center", width: "100%",
-              flex: isMobile ? "1 1 100%" : undefined,
-            }}
-              onMouseEnter={e => { e.currentTarget.style.color = "#999"; }}
-              onMouseLeave={e => { e.currentTarget.style.color = "#bbb"; }}
-            >Reset</button>
+              textAlign: "center", width: "100%",
+            }}>Reset</button>
           </div>
-        </nav>
-
-        {/* ── Main Panel ── */}
-        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
           {/* Tab bar */}
           {(selected || syntheses.length > 0) && (
-            <div style={{
-              display: "flex", borderBottom: "1px solid #e0e0e0",
-              padding: isMobile ? "0" : "0 24px",
-              justifyContent: "space-between", alignItems: "center",
-            }}>
-              <div style={{ display: "flex", flex: isMobile ? 1 : undefined }}>
-                {selected && (
-                  <button onClick={() => setView("riffs")} style={{
-                    padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
-                    letterSpacing: "0.06em", textTransform: "uppercase",
-                    background: "none", border: "none", cursor: "pointer",
-                    borderBottom: view === "riffs" ? "2px solid #000" : "2px solid transparent",
-                    color: view === "riffs" ? "#000" : "#999", fontFamily: "inherit",
-                    flex: isMobile ? 1 : undefined, minHeight: isMobile ? 44 : undefined,
-                  }}>Resources</button>
-                )}
-                <button onClick={() => setView("synthesis")} style={{
-                  padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
-                  letterSpacing: "0.06em", textTransform: "uppercase",
+            <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+              {selected && (
+                <button onClick={() => setView("riffs")} style={{
+                  flex: 1, padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
+                  letterSpacing: "0.06em", textTransform: "uppercase", minHeight: 44,
                   background: "none", border: "none", cursor: "pointer",
-                  borderBottom: view === "synthesis" ? "2px solid #000" : "2px solid transparent",
-                  color: view === "synthesis" ? "#000" : "#999", fontFamily: "inherit",
-                  flex: isMobile ? 1 : undefined, minHeight: isMobile ? 44 : undefined,
-                }}>Synthesis {syntheses.length > 0 && `(${syntheses.length})`}</button>
-              </div>
-              {/* Per-seed export — desktop only in tab bar */}
-              {!isMobile && view === "riffs" && selected?.riffs?.length > 0 && (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={handleExportSeed} style={smallBtn()}>Export .md</button>
-                  <button onClick={handleCopySeed} style={smallBtn()}>{copied ? "Copied!" : "Copy"}</button>
-                </div>
+                  borderBottom: view === "riffs" ? "2px solid #000" : "2px solid transparent",
+                  color: view === "riffs" ? "#000" : "#999", fontFamily: "inherit",
+                }}>Resources</button>
               )}
+              <button onClick={() => setView("synthesis")} style={{
+                flex: 1, padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
+                letterSpacing: "0.06em", textTransform: "uppercase", minHeight: 44,
+                background: "none", border: "none", cursor: "pointer",
+                borderBottom: view === "synthesis" ? "2px solid #000" : "2px solid transparent",
+                color: view === "synthesis" ? "#000" : "#999", fontFamily: "inherit",
+              }}>Synthesis {syntheses.length > 0 && `(${syntheses.length})`}</button>
             </div>
           )}
 
-          {/* Content */}
-          {!selected && view !== "synthesis" ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>
-              Select a seed and hit Riff
-            </div>
-          ) : view === "riffs" && selected ? (
-            <>
-              <div style={{
-                padding: isMobile ? "12px 16px 10px" : "14px 24px 10px",
-                borderBottom: "1px solid #f0f0f0",
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                      <span style={{ fontSize: 13 }}>{CAT_ICONS[selected.category] || "\u25CF"}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#aaa" }}>
-                        {selected.category}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>{selected.text}</div>
-                  </div>
-                  {committedRiffs.length > 0 && (
-                    <button onClick={clearRiffs} style={smallBtn()}>Clear</button>
-                  )}
-                </div>
-                {/* Per-seed export — mobile: below header */}
-                {isMobile && selected?.riffs?.length > 0 && (
-                  <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                    <button onClick={handleExportSeed} style={{ ...smallBtn(), minHeight: 44 }}>Export .md</button>
-                    <button onClick={handleCopySeed} style={{ ...smallBtn(), minHeight: 44 }}>{copied ? "Copied!" : "Copy"}</button>
-                  </div>
-                )}
+          {/* Results area — takes remaining height */}
+          <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            {!selected && view !== "synthesis" ? (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>
+                Select a seed and hit Riff
               </div>
+            ) : view === "riffs" && selected ? (
+              renderRiffsContent("12px 16px")
+            ) : view === "synthesis" ? (
+              renderSynthesisContent("16px")
+            ) : null}
+          </main>
+        </div>
+      </>
+    );
+  }
 
-              {types.length > 2 && (
-                <div style={{ padding: isMobile ? "8px 16px" : "8px 24px", display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid #f0f0f0" }}>
-                  {types.map(t => (
-                    <button key={t} onClick={() => setFilter(t)} style={{
-                      padding: isMobile ? "8px 12px" : "3px 9px", fontSize: 11, fontWeight: 600,
-                      background: filter === t ? "#000" : "#f5f5f5",
-                      color: filter === t ? "#fff" : "#666",
-                      border: "none", cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize",
-                      minHeight: isMobile ? 44 : undefined,
-                    }}>{t === "all" ? `All (${displayRiffs.length})` : `${ICONS[t] || ""} ${t}`}</button>
-                  ))}
-                </div>
-              )}
+  /* ── DESKTOP LAYOUT ── */
+  return (
+    <div style={{ display: "flex", height: "100vh" }}>
+      {/* Sidebar */}
+      <nav style={{ width: 280, minWidth: 280, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", height: "100%" }}>
+        <div style={{ padding: "16px 12px 12px", borderBottom: "1px solid #e0e0e0" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
+            Riff Machine
+          </div>
+          <div style={{ fontSize: 12, color: "#999", fontWeight: 400, marginBottom: 12 }}>
+            Pick a category, type an idea, hit Riff.
+          </div>
+          <select value={category} onChange={e => setCategory(e.target.value)} style={{
+            width: "100%", padding: "7px 8px", marginBottom: 8,
+            border: "1px solid #ccc", borderRadius: 0, fontSize: 13,
+            fontFamily: "inherit", background: "#fff", cursor: "pointer", appearance: "auto",
+          }}>
+            {SEED_CATEGORIES.map(c => (
+              <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
+            ))}
+          </select>
+          <div style={{ display: "flex", gap: 5 }}>
+            <input ref={inputRef} value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addSeed()}
+              placeholder="Enter a seed idea\u2026"
+              style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }}
+            />
+            <button onClick={addSeed} disabled={!input.trim()} style={{
+              padding: "7px 11px", background: input.trim() ? "#000" : "#ddd",
+              color: "#fff", border: "none", fontSize: 14, cursor: input.trim() ? "pointer" : "default",
+              fontFamily: "inherit", fontWeight: 600,
+            }}>+</button>
+          </div>
+        </div>
 
-              <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "12px 16px" : "16px 24px" }}>
-                {error && (
-                  <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>{error}</div>
-                )}
-                {filtered.length === 0 && !loading && (
-                  <div style={{ color: "#bbb", fontSize: 13, paddingTop: 24, textAlign: "center" }}>
-                    Hit Riff to discover resources through the {selected.category} lens
-                  </div>
-                )}
-                {filtered.map((item, i) => <ResourceCard key={`${selected.id}-${i}-${item.title}`} item={item} index={i} />)}
-                {loading && filtered.length === 0 && (
-                  <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering…"} <Dots /></div>
-                )}
-              </div>
-            </>
-          ) : view === "synthesis" ? (
-            <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? "16px" : "20px 28px" }}>
-              {error && (
-                <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>{error}</div>
+        {/* Seeds list */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {seeds.map(seed => (
+            <SeedItem key={seed.id} seed={seed} isSelected={seed.id === selectedId}
+              onClick={() => selectSeed(seed.id)}
+              onDelete={() => deleteSeed(seed.id)} />
+          ))}
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ padding: 10, borderTop: "1px solid #e0e0e0", display: "flex", flexDirection: "column", gap: 5 }}>
+          <button onClick={riff} disabled={!selected || loading} style={{
+            width: "100%", padding: "10px 14px",
+            background: !selected || loading ? "#e8e8e8" : "#000",
+            color: !selected || loading ? "#aaa" : "#fff",
+            border: "none", fontSize: 12, fontWeight: 700,
+            letterSpacing: "0.08em", textTransform: "uppercase",
+            cursor: !selected || loading ? "default" : "pointer", fontFamily: "inherit",
+          }}>{loading ? <Dots /> : "Riff"}</button>
+
+          <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{
+            width: "100%", padding: "10px 14px", background: "transparent",
+            color: seeds.length < 2 || synthLoading ? "#ccc" : "#000",
+            border: `1px solid ${seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"}`,
+            fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+            cursor: seeds.length < 2 || synthLoading ? "default" : "pointer", fontFamily: "inherit",
+          }}>{synthLoading ? <Dots /> : `Synthesize${seeds.length >= 2 ? ` (${seeds.length})` : ""}`}</button>
+
+          <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+            <button onClick={handleExportAll} disabled={seeds.length === 0} style={{
+              ...smallBtn(seeds.length > 0), flex: 1,
+            }}>Export All</button>
+            <button onClick={handleCopyAll} disabled={seeds.length === 0} style={{
+              ...smallBtn(seeds.length > 0), flex: 1,
+            }}>{copied ? "Copied!" : "Copy MD"}</button>
+          </div>
+          <button onClick={handleReset} style={{
+            background: "none", border: "none", padding: "4px 0",
+            fontSize: 11, color: "#bbb", textTransform: "uppercase",
+            letterSpacing: "0.06em", cursor: "pointer", fontFamily: "inherit",
+            marginTop: 8, textAlign: "center", width: "100%",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.color = "#999"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "#bbb"; }}
+          >Reset</button>
+        </div>
+      </nav>
+
+      {/* Main Panel */}
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Tab bar */}
+        {(selected || syntheses.length > 0) && (
+          <div style={{
+            display: "flex", borderBottom: "1px solid #e0e0e0",
+            padding: "0 24px", justifyContent: "space-between", alignItems: "center",
+          }}>
+            <div style={{ display: "flex" }}>
+              {selected && (
+                <button onClick={() => setView("riffs")} style={{
+                  padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
+                  letterSpacing: "0.06em", textTransform: "uppercase",
+                  background: "none", border: "none", cursor: "pointer",
+                  borderBottom: view === "riffs" ? "2px solid #000" : "2px solid transparent",
+                  color: view === "riffs" ? "#000" : "#999", fontFamily: "inherit",
+                }}>Resources</button>
               )}
-              {syntheses.length === 0 && !synthLoading && (
-                <div style={{ color: "#bbb", fontSize: 13, paddingTop: 24, textAlign: "center", lineHeight: 1.7 }}>
-                  {seedsWithRiffs < 2 ? "Riff on 2+ seeds, then Synthesize" : "Hit Synthesize to find cross-connections"}
-                </div>
-              )}
-              {syntheses.map((syn, i) => <SynthesisCard key={i} syn={syn} index={i} />)}
-              {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing…"} <Dots /></div>}
+              <button onClick={() => setView("synthesis")} style={{
+                padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
+                letterSpacing: "0.06em", textTransform: "uppercase",
+                background: "none", border: "none", cursor: "pointer",
+                borderBottom: view === "synthesis" ? "2px solid #000" : "2px solid transparent",
+                color: view === "synthesis" ? "#000" : "#999", fontFamily: "inherit",
+              }}>Synthesis {syntheses.length > 0 && `(${syntheses.length})`}</button>
             </div>
-          ) : null}
-        </main>
-      </div>
-    </>
+            {view === "riffs" && selected?.riffs?.length > 0 && (
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={handleExportSeed} style={smallBtn()}>Export .md</button>
+                <button onClick={handleCopySeed} style={smallBtn()}>{copied ? "Copied!" : "Copy"}</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Content */}
+        {!selected && view !== "synthesis" ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>
+            Select a seed and hit Riff
+          </div>
+        ) : view === "riffs" && selected ? (
+          renderRiffsContent("14px 24px 10px")
+        ) : view === "synthesis" ? (
+          renderSynthesisContent("20px 28px")
+        ) : null}
+      </main>
+    </div>
   );
 }
