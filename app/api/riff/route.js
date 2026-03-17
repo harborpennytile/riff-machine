@@ -8,27 +8,21 @@ export async function POST(req) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not configured" }, { status: 500 });
   }
 
-  const body = await req.json();
+  let body;
+  try { body = await req.json(); } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-  // Validate
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  // Sanitise messages
   const sanitisedMessages = body.messages.map(msg => ({
     role: msg.role === "assistant" ? "assistant" : "user",
-    content: typeof msg.content === "string"
-      ? msg.content.slice(0, 10000)
-      : String(msg.content).slice(0, 10000),
+    content: typeof msg.content === "string" ? msg.content.slice(0, 10000) : String(msg.content).slice(0, 10000),
   }));
 
-  // Sanitise system prompt
-  const sanitisedSystem = typeof body.system === "string"
-    ? body.system.slice(0, 5000)
-    : "";
-
-  // Cap tokens
+  const sanitisedSystem = typeof body.system === "string" ? body.system.slice(0, 5000) : "";
   const maxTokens = Math.min(Number(body.max_tokens) || 2000, 4000);
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -52,13 +46,12 @@ export async function POST(req) {
     return NextResponse.json({ error: err }, { status: res.status });
   }
 
-  // If streaming, pass through the SSE stream
   if (body.stream) {
     return new Response(res.body, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        Connection: "keep-alive",
+        "Connection": "keep-alive",
       },
     });
   }
