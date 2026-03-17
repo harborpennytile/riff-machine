@@ -24,10 +24,11 @@ function LandingPage({ onLaunch }) {
     <div style={{
       minHeight: "100vh", display: "flex", flexDirection: "column",
       alignItems: "center", justifyContent: "center",
-      padding: "48px 24px", fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
-      maxWidth: 640, margin: "0 auto",
+      padding: "20px", fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+      maxWidth: 600, margin: "0 auto",
+      wordWrap: "break-word", overflowWrap: "break-word",
     }}>
-      <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 8 }}>
+      <h1 style={{ fontSize: "clamp(28px, 6vw, 48px)", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 8 }}>
         Riff Machine
       </h1>
       <h2 style={{ fontSize: 16, fontWeight: 400, color: "#666", marginBottom: 32 }}>

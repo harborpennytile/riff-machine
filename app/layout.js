@@ -1,5 +1,12 @@
 import "./globals.css";
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export const metadata = {
   title: "Riff Machine - AI Creative Discovery Engine",
   description: "Enter seed ideas, discover unexpected connections across art, music, philosophy, finance, food, and more. Find real articles, songs, books, and people. Synthesize emergent themes. Export to Markdown for Substack and Medium.",
