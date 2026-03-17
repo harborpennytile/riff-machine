@@ -1,48 +1,52 @@
 "use client";
-
 import { useState, useEffect, useCallback, useRef } from "react";
 import storage from "@/lib/storage";
 import { exportSeedMarkdown, exportAllMarkdown, downloadMarkdown, copyToClipboard } from "@/lib/export";
 
 const API_URL = "/api/riff";
 const MODEL = process.env.NEXT_PUBLIC_ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
-const STORAGE_KEY = "riffmachine:v3";
+const STORAGE_KEY = "riffmachine:v4";
 
-const SEED_CATEGORIES = ["art", "music", "tech", "philosophy", "finance", "food", "nature", "news", "random", "other"];
-const ICONS = { article: "ART", visual: "VIS", music: "MUS", book: "BK", concept: "CON", person: "PER" };
-const CAT_ICONS = { art: "Art", music: "Mus", tech: "Tec", philosophy: "Phi", finance: "Fin", food: "Fod", nature: "Nat", news: "New", random: "Rnd", other: "Oth" };
-const TYPE_LABELS = { article: "Article", visual: "Visual", music: "Music", book: "Book", concept: "Concept", person: "Person" };
+const CATEGORIES = [
+  { id: "art", icon: "\u{1F3A8}", label: "Art" },
+  { id: "music", icon: "\u{1F3B6}", label: "Music" },
+  { id: "tech", icon: "\u{26A1}", label: "Tech" },
+  { id: "philosophy", icon: "\u{1F9E0}", label: "Philosophy" },
+  { id: "finance", icon: "\u{1F4B0}", label: "Finance" },
+  { id: "food", icon: "\u{1F373}", label: "Food" },
+  { id: "nature", icon: "\u{1F33F}", label: "Nature" },
+  { id: "news", icon: "\u{1F4F0}", label: "News" },
+  { id: "random", icon: "\u{1F3B2}", label: "Random" },
+  { id: "other", icon: "\u{2726}", label: "Other" },
+];
 
-/* -- Sanitisation -- */
-function sanitiseInput(text) {
-  return text
-    .replace(/<[^>]*>/g, "")
-    .replace(/javascript:/gi, "")
-    .replace(/on\w+\s*=/gi, "")
-    .replace(/[{}<>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200);
+const TYPE_ICONS = {
+  article: "\u{1F4C4}", visual: "\u{1F5BC}", music: "\u{1F3B5}",
+  book: "\u{1F4D6}", concept: "\u{1F4A1}", person: "\u{1F464}",
+};
+
+function catIcon(id) {
+  return CATEGORIES.find(c => c.id === id)?.icon || "";
 }
 
-/* --Storage --*/
+function sanitise(text) {
+  return text.replace(/<[^>]*>/g, "").replace(/javascript:/gi, "").replace(/on\w+\s*=/gi, "")
+    .replace(/[{}<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+/* -- Storage -- */
 async function loadState() {
-  for (const key of [STORAGE_KEY, "riffmachine:v2", "riffmachine:state"]) {
+  for (const key of [STORAGE_KEY, "riffmachine:v3", "riffmachine:v2", "riffmachine:state"]) {
     try {
       const r = await storage.get(key);
-      if (r?.value) {
-        const p = JSON.parse(r.value);
-        if (p?.seeds?.length) return p;
-      }
+      if (r?.value) { const p = JSON.parse(r.value); if (p?.seeds?.length) return p; }
     } catch {}
   }
   return null;
 }
-async function saveState(state) {
-  try { await storage.set(STORAGE_KEY, JSON.stringify(state)); } catch {}
-}
+async function saveState(s) { try { await storage.set(STORAGE_KEY, JSON.stringify(s)); } catch {} }
 
-/* --Streaming API --*/
+/* -- Streaming -- */
 async function streamAPI(system, userMsg, onChunk, signal) {
   const res = await fetch(API_URL, {
     method: "POST",
@@ -50,230 +54,203 @@ async function streamAPI(system, userMsg, onChunk, signal) {
     body: JSON.stringify({ model: MODEL, max_tokens: 2000, stream: true, system, messages: [{ role: "user", content: userMsg }] }),
     signal,
   });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${errText.slice(0, 200)}`);
-  }
+  if (!res.ok) throw new Error("API error " + res.status);
   const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "", fullText = "";
+  const dec = new TextDecoder();
+  let buf = "", full = "";
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6).trim();
-      if (data === "[DONE]") continue;
-      try {
-        const evt = JSON.parse(data);
-        if (evt.type === "content_block_delta" && evt.delta?.text) {
-          fullText += evt.delta.text;
-          onChunk(fullText);
-        }
-      } catch {}
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n"); buf = lines.pop() || "";
+    for (const ln of lines) {
+      if (!ln.startsWith("data: ")) continue;
+      const d = ln.slice(6).trim();
+      if (d === "[DONE]") continue;
+      try { const e = JSON.parse(d); if (e.type === "content_block_delta" && e.delta?.text) { full += e.delta.text; onChunk(full); } } catch {}
     }
   }
-  return fullText;
+  return full;
 }
 
-/* --JSON extraction --*/
 function extractItems(text) {
   const items = [];
-  const regex = /\{[^{}]*"type"\s*:\s*"[^"]+?"[^{}]*"title"\s*:\s*"[^"]*?"[^{}]*\}/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    try {
-      const obj = JSON.parse(match[0]);
-      if (obj.type && obj.title) items.push(obj);
-    } catch {}
-  }
+  const re = /\{[^{}]*"type"\s*:\s*"[^"]+?"[^{}]*"title"\s*:\s*"[^"]*?"[^{}]*\}/g;
+  let m;
+  while ((m = re.exec(text)) !== null) { try { const o = JSON.parse(m[0]); if (o.type && o.title) items.push(o); } catch {} }
   return items;
 }
 
-/* --Prompts --*/
-function riffPrompt(selectedSeed, allSeeds) {
-  const seedText = selectedSeed.text;
-  const category = selectedSeed.category;
-  const others = (allSeeds || []).filter(s => s.id !== selectedSeed.id);
-  const isMultiSeed = others.length > 0;
+/* -- Prompts -- */
+function buildRiffPrompt(seed, allSeeds) {
+  const others = allSeeds.filter(s => s.id !== seed.id);
+  const hasOthers = others.length > 0;
 
-  let seedList = "";
-  let prevResources = "";
-  if (isMultiSeed) {
-    seedList = allSeeds.map(s => {
-      const marker = s.id === selectedSeed.id ? " (FOCUSED)" : "";
-      return `- [${s.category}] "${s.text}"${marker}`;
-    }).join("\n");
-    const allPrev = allSeeds.flatMap(s =>
-      (s.riffs || []).map(r => `- "${r.title}" (from "${s.text}")`)
-    );
-    prevResources = allPrev.length > 0
-      ? "\n\nPreviously discovered resources (titles only):\n" + allPrev.join("\n")
-      : "";
+  let ctx = "";
+  if (hasOthers) {
+    ctx = "\n\nThe user's full seed collection:\n" +
+      allSeeds.map(s => {
+        const titles = (s.riffs || []).map(r => r.title).filter(Boolean).slice(0, 5);
+        return `- [${s.category}] "${s.text}"${titles.length ? " (found: " + titles.join(", ") + ")" : ""}`;
+      }).join("\n");
   }
 
-  const multiSeedSystem = `You are a creative discovery engine that finds unexpected connections ACROSS multiple ideas.
-
-The user has a collection of seed ideas across different domains. Your job is to find resources that BRIDGE between these seeds -- not just match one of them. The best results are ones nobody would find by searching any single seed alone.
-
-The user is currently focused on: "${seedText}" [${category}]
-
-Their full collection of seeds:
-${seedList}${prevResources}
-
-Return ONLY a JSON array of 4-5 resources. Each resource MUST connect to the focused seed AND at least one other seed. No resource should only relate to a single seed.
-
-Each item: {"type":"article|visual|music|book|concept|person","title":"...","desc":"1-2 sentences explaining how this connects MULTIPLE seeds together","link":"Names which 2+ seeds this bridges and how","search":"concise google search query to find this resource"}
-
-RULES:
-- Do NOT include a url field. Instead include a "search" field with a short, specific Google search query that would find this exact resource (e.g. "John Cage mushroom music atlas eclipticalis" not just "John Cage").
-- Every result MUST bridge 2+ seeds. If it only relates to one seed, don't include it.
-- The "link" field must explicitly name which seeds are connected, e.g. "Bridges 'apple' and 'Miro' through..."
-- Be surprising. The value is in connections humans wouldn't make.
-- Keep descriptions SHORT. 1-2 sentences max.
-- Return ONLY the JSON array. Nothing else.`;
-
-  const singleSeedSystem = `You are a discovery engine. Given a seed idea in the "${category}" domain, find 4-5 REAL specific resources. Return ONLY a JSON array -- no markdown, no backticks, no wrapper object.
-
-Each item: {"type":"article|visual|music|book|concept|person","title":"...","desc":"1-2 sentences on why this connects","link":"how it relates to another item here","search":"concise google search query to find this resource"}
-
-RULES:
-- Do NOT include a url field. Instead include a "search" field with a short, specific Google search query that would find this exact resource (e.g. "John Cage mushroom music atlas eclipticalis" not just "John Cage").
-- The "${category}" lens should shape your picks -- find resources that speak to this seed THROUGH ${category}
-- Be surprising. Skip the obvious. Find oblique, cross-domain connections.
-- Keep descriptions SHORT. 1-2 sentences max.
-- Return ONLY the JSON array. Nothing else.`;
+  const crossRule = hasOthers
+    ? `\nCRITICAL: Every result MUST bridge the focused seed with at least one other seed from the collection. In the "link" field, name which seeds connect and how. Do NOT return results about only one seed.`
+    : `\nFind diverse, cross-domain resources for this seed.`;
 
   return {
-    system: isMultiSeed ? multiSeedSystem : singleSeedSystem,
-    user: isMultiSeed
-      ? `Find resources that connect my seeds together, focused on: "${seedText}"`
-      : `Seed: "${seedText}" [category: ${category}]`
+    system: `You are a creative discovery engine that finds unexpected connections across ideas.
+
+The user is focused on: "${seed.text}" [${seed.category}]${ctx}
+
+Return ONLY a JSON array of 4-5 items. No markdown, no backticks, no wrapper.
+
+Each item: {"type":"article|visual|music|book|concept|person","title":"Specific real title","search":"precise Google search query to find this exact resource","desc":"1-2 sentences on how this connects multiple seeds","link":"Which seeds this bridges and how"}
+
+RULES:
+- Do NOT include a "url" field. Include a "search" field with a precise search query (e.g. "John Cage Atlas Eclipticalis mushroom foraging composition" not just "John Cage").
+- The title must be a real, specific work, article, book, song, person, or concept.
+- Keep descriptions to 1-2 sentences.${crossRule}
+- Be surprising. Find oblique, non-obvious connections.`,
+    user: `Find resources connecting my seeds, focused on: "${seed.text}"`,
   };
 }
 
-function synthPrompt(seeds) {
+function buildSynthPrompt(seeds) {
   return {
-    system: `You find emergent cross-connections across multiple seed ideas. Return ONLY a JSON array of synthesis objects -- no markdown, no backticks.
+    system: `You find emergent cross-connections across seed ideas. Return ONLY a JSON array. No markdown, no backticks.
 
-Each: {"name":"theme name","insight":"2-3 sentences on the deep connection. Be SPECIFIC.","seeds":["seed1","seed2"],"refs":["resource title 1","resource title 2"],"leads":[{"type":"...","title":"...","desc":"...","search":"concise google search query to find this resource"}]}
+Each: {"name":"theme","insight":"2-3 specific sentences","seeds":["seed1","seed2"],"refs":["resource title"],"leads":[{"type":"...","title":"...","search":"google search query","desc":"..."}]}
 
-RULES:
-- 2-3 syntheses max
-- Each connects 2+ seeds
-- leads are NEW resources no single seed would find
-- Do NOT include a url field in leads. Instead include a "search" field with a short, specific Google search query.
-- Be specific not vague
-- Return ONLY the JSON array`,
-    user: `Seeds and resources:\n${JSON.stringify(seeds.map(s => ({
-      seed: s.text, cat: s.category, resources: (s.riffs || []).map(r => ({ type: r.type, title: r.title, desc: r.desc }))
-    })), null, 1)}`
+RULES: 2-3 syntheses. Each connects 2+ seeds. Leads are NEW resources no single seed would find. Be specific. No url field, use search field instead.`,
+    user: `Seeds:\n${JSON.stringify(seeds.map(s => ({ seed: s.text, cat: s.category, resources: (s.riffs || []).map(r => ({ type: r.type, title: r.title, desc: r.desc })) })), null, 1)}`,
   };
 }
 
-/* --Micro Components --*/
-function Dots() {
+/* -- Hook -- */
+function useIsMobile(bp = 768) {
+  const [m, setM] = useState(false);
+  useEffect(() => { const c = () => setM(window.innerWidth < bp); c(); window.addEventListener("resize", c); return () => window.removeEventListener("resize", c); }, [bp]);
+  return m;
+}
+
+/* -- Shared Sub-Components -- */
+
+function SearchLink({ title, search }) {
+  const q = search || title;
+  const href = "https://www.google.com/search?q=" + encodeURIComponent(q);
   return (
-    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-      {[0,1,2].map(i => <span key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "currentColor", animation: `dot 1s ease-in-out ${i*.15}s infinite` }} />)}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontWeight: 600 }}>{title}</span>
+      <a href={href} target="_blank" rel="noopener noreferrer nofollow" title={"Search: " + q}
+        style={{ color: "#999", fontSize: 11, textDecoration: "none", border: "1px solid #ddd", borderRadius: 3, padding: "1px 6px", whiteSpace: "nowrap" }}>
+        search
+      </a>
     </span>
   );
 }
 
-function ResourceCard({ item, index }) {
-  const searchUrl = item.search
-    ? `https://www.google.com/search?q=${encodeURIComponent(item.search)}`
-    : `https://www.google.com/search?q=${encodeURIComponent(item.title)}`;
+function ResourceCard({ item, idx }) {
   return (
-    <article style={{
-      padding: "14px 16px", borderLeft: "3px solid #000", marginBottom: 10,
-      background: "#fafafa", animation: `fadeUp 0.25s ease ${index * 0.04}s both`,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
-        <span style={{ fontSize: 14 }}>{ICONS[item.type] || "--"}</span>
-        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#888" }}>
-          {TYPE_LABELS[item.type] || item.type}
-        </span>
+    <article style={{ padding: "14px 16px", borderLeft: "3px solid #000", marginBottom: 10, background: "#fafafa", animation: "fadeUp 0.25s ease " + (idx * 0.04) + "s both" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 13 }}>{TYPE_ICONS[item.type] || ""}</span>
+        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#888" }}>{item.type}</span>
       </div>
-      <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 5, lineHeight: 1.3 }}>
-        <a href={searchUrl} target="_blank" rel="noopener noreferrer nofollow"
-          style={{ color: "#000", textDecoration: "underline", textUnderlineOffset: 2 }}>{item.title}</a>
+      <div style={{ fontSize: 14.5, marginBottom: 5, lineHeight: 1.3 }}>
+        <SearchLink title={item.title} search={item.search} />
       </div>
-      <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{item.desc || item.description}</div>
+      <div style={{ fontSize: 13, color: "#444", lineHeight: 1.55 }}>{item.desc || item.description || ""}</div>
       {(item.link || item.connection) && (
         <div style={{ fontSize: 11.5, color: "#999", fontStyle: "italic", marginTop: 6 }}>
-          {">>"}{item.link || item.connection}
+          {">> "}{item.link || item.connection}
         </div>
       )}
     </article>
   );
 }
 
-function SynthesisCard({ syn, index }) {
+function SynthCard({ syn, idx }) {
   return (
-    <article style={{
-      padding: "18px 20px", border: "2px solid #000", marginBottom: 14,
-      background: "#fff", animation: `fadeUp 0.3s ease ${index * 0.08}s both`,
-    }}>
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{">> "}{syn.name}</div>
+    <article style={{ padding: "18px 20px", border: "2px solid #000", marginBottom: 14, background: "#fff", animation: "fadeUp 0.3s ease " + (idx * 0.08) + "s both" }}>
+      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{syn.name}</div>
       <div style={{ fontSize: 13.5, color: "#333", lineHeight: 1.65, marginBottom: 12 }}>{syn.insight}</div>
       {syn.seeds?.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
-          {syn.seeds.map((s, i) => (
-            <span key={i} style={{ fontSize: 11, padding: "2px 8px", background: "#f0f0f0", border: "1px solid #ddd" }}>{s}</span>
-          ))}
+          {syn.seeds.map((s, i) => <span key={i} style={{ fontSize: 11, padding: "2px 8px", background: "#f0f0f0", border: "1px solid #ddd" }}>{s}</span>)}
         </div>
       )}
-      {syn.refs?.length > 0 && (
-        <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" - ")}</div>
-      )}
-      {syn.leads?.map((lead, i) => <ResourceCard key={i} item={lead} index={i} />)}
+      {syn.refs?.length > 0 && <div style={{ fontSize: 12, color: "#777", marginBottom: 10 }}>{syn.refs.join(" - ")}</div>}
+      {syn.leads?.map((lead, i) => <ResourceCard key={i} item={lead} idx={i} />)}
     </article>
   );
 }
 
-function SeedItem({ seed, isSelected, onClick, onDelete }) {
-  const count = seed.riffs?.length || 0;
-  return (
-    <div onClick={onClick} style={{
-      padding: "10px 12px", cursor: "pointer",
-      background: isSelected ? "#000" : "transparent",
-      color: isSelected ? "#fff" : "#000",
-      borderBottom: "1px solid #e8e8e8", fontSize: 13,
-      display: "flex", alignItems: "center", gap: 8, transition: "all 0.1s",
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 12, flexShrink: 0 }}>{CAT_ICONS[seed.category] || "*"}</span>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>
-            {seed.text}
-          </span>
+function ResultsContent({ selected, displayRiffs, filtered, types, filter, setFilter, syntheses, view, loading, synthLoading, error, clearRiffs, doExportSeed, doCopy, copied, seedsWithRiffs, isMobile }) {
+  if (view === "riffs" && selected) {
+    return (
+      <>
+        {/* Seed header */}
+        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+              <span style={{ fontSize: 13 }}>{catIcon(selected.category)}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#aaa" }}>{selected.category}</span>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600 }}>{selected.text}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(selected.riffs?.length > 0) && <>
+              <button onClick={doExportSeed} style={tinyBtn}>Export .md</button>
+              <button onClick={() => doCopy(false)} style={tinyBtn}>{copied ? "Done" : "Copy"}</button>
+              <button onClick={clearRiffs} style={tinyBtn}>Clear</button>
+            </>}
+          </div>
         </div>
-        <div style={{ fontSize: 10.5, color: isSelected ? "#aaa" : "#999", marginTop: 2, paddingLeft: 22 }}>
-          {seed.category}{count > 0 ? ` - ${count} found` : ""}
+
+        {/* Type filters */}
+        {types.length > 2 && (
+          <div style={{ padding: "8px 16px", display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid #f0f0f0" }}>
+            {types.map(t => (
+              <button key={t} onClick={() => setFilter(t)} style={{
+                padding: "3px 9px", fontSize: 11, fontWeight: 600,
+                background: filter === t ? "#000" : "#f5f5f5", color: filter === t ? "#fff" : "#666",
+                border: "none", cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize",
+              }}>{t === "all" ? "All (" + displayRiffs.length + ")" : (TYPE_ICONS[t] || "") + " " + t}</button>
+            ))}
+          </div>
+        )}
+
+        {/* Results */}
+        <div style={{ padding: "16px" }}>
+          {error && <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14 }}>{error}</div>}
+          {filtered.length === 0 && !loading && <div style={{ color: "#bbb", fontSize: 13, paddingTop: 20, textAlign: "center" }}>Hit Riff to discover cross-connections</div>}
+          {filtered.map((item, i) => <ResourceCard key={selected.id + "-" + i} item={item} idx={i} />)}
+          {loading && filtered.length === 0 && <div style={{ textAlign: "center", padding: "20px 0", color: "#999", fontSize: 13 }}>Discovering...</div>}
         </div>
+      </>
+    );
+  }
+
+  if (view === "synthesis") {
+    return (
+      <div style={{ padding: "16px" }}>
+        {error && <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14 }}>{error}</div>}
+        {syntheses.length === 0 && !synthLoading && <div style={{ color: "#bbb", fontSize: 13, paddingTop: 20, textAlign: "center" }}>{seedsWithRiffs < 2 ? "Riff on 2+ seeds, then Synthesize" : "Hit Synthesize to find cross-connections"}</div>}
+        {syntheses.map((syn, i) => <SynthCard key={i} syn={syn} idx={i} />)}
+        {synthLoading && <div style={{ textAlign: "center", padding: "20px 0", color: "#999", fontSize: 13 }}>Synthesizing...</div>}
       </div>
-      <button onClick={e => { e.stopPropagation(); onDelete(); }} style={{
-        background: "none", border: "none", cursor: "pointer",
-        color: isSelected ? "#777" : "#ccc", fontSize: 15, lineHeight: 1, flexShrink: 0,
-        display: "flex", alignItems: "center",
-      }}><svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.5" fill="none"><line x1="1" y1="1" x2="9" y2="9" /><line x1="9" y1="1" x2="1" y2="9" /></svg></button>
-    </div>
-  );
+    );
+  }
+
+  return <div style={{ padding: "40px 16px", textAlign: "center", color: "#bbb", fontSize: 14 }}>Select a seed and hit Riff</div>;
 }
 
-/* Small button style helper */
-const smallBtn = (active = true) => ({
-  background: "none", border: "1px solid #ddd", padding: "4px 10px",
-  fontSize: 11, cursor: active ? "pointer" : "default",
-  color: active ? "#666" : "#ccc", fontFamily: "inherit",
-  transition: "all 0.1s",
-});
+const tinyBtn = { background: "none", border: "1px solid #ddd", padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#666", fontFamily: "inherit" };
 
-/* --Main App --*/
+/* ========== MAIN COMPONENT ========== */
+
 export default function RiffMachine() {
   const [seeds, setSeeds] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -288,51 +265,35 @@ export default function RiffMachine() {
   const [filter, setFilter] = useState("all");
   const [ready, setReady] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     loadState().then(s => {
       if (s) {
-        const migrated = (s.seeds || []).map(sd => {
+        const mig = (s.seeds || []).map(sd => {
           let riffs = sd.riffs || sd.categories || [];
           if (!Array.isArray(riffs)) riffs = [];
-          riffs = riffs.filter(r => r != null && (typeof r === "object" || typeof r === "string"));
-          riffs = riffs.map(r => typeof r === "string" ? { type: "concept", title: r, desc: r } : r);
+          riffs = riffs.filter(r => r != null && typeof r === "object").map(r => typeof r === "string" ? { type: "concept", title: r, desc: r } : r);
           return { ...sd, category: sd.category || "art", riffs };
         });
-        setSeeds(migrated);
-        setSyntheses(s.syntheses || []);
+        setSeeds(mig); setSyntheses(s.syntheses || []);
         if (s.selectedId) setSelectedId(s.selectedId);
       }
       setReady(true);
     });
   }, []);
 
-  useEffect(() => {
-    if (ready) saveState({ seeds, selectedId, syntheses });
-  }, [seeds, selectedId, syntheses, ready]);
-
-  useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
+  useEffect(() => { if (ready) saveState({ seeds, selectedId, syntheses }); }, [seeds, selectedId, syntheses, ready]);
 
   const selected = seeds.find(s => s.id === selectedId);
   const seedsWithRiffs = seeds.filter(s => s.riffs?.length > 0).length;
 
   const addSeed = useCallback(() => {
-    const t = sanitiseInput(input);
-    if (!t) return;
+    const t = sanitise(input); if (!t) return;
     const ns = { id: Date.now().toString(), text: t, category, riffs: [] };
-    setSeeds(p => [ns, ...p]);
-    setSelectedId(ns.id);
-    setInput("");
-    setView("riffs");
-    setFilter("all");
+    setSeeds(p => [ns, ...p]); setSelectedId(ns.id); setInput(""); setView("riffs"); setFilter("all");
     inputRef.current?.focus();
   }, [input, category]);
 
@@ -340,9 +301,9 @@ export default function RiffMachine() {
     setSeeds(prev => {
       const updated = prev.filter(s => s.id !== id);
       if (selectedId === id) {
-        const oldIndex = prev.findIndex(s => s.id === id);
-        const nextSeed = updated[Math.min(oldIndex, updated.length - 1)];
-        setSelectedId(nextSeed?.id || null);
+        const oldIdx = prev.findIndex(s => s.id === id);
+        const next = updated[Math.min(oldIdx, updated.length - 1)];
+        setSelectedId(next?.id || null);
       }
       return updated;
     });
@@ -353,440 +314,193 @@ export default function RiffMachine() {
     setLoading(true); setError(null); setView("riffs"); setStreamItems([]);
     abortRef.current = new AbortController();
     try {
-      const { system, user } = riffPrompt(selected, seeds);
-      const fullText = await streamAPI(system, user, (partial) => {
-        setStreamItems(extractItems(partial));
-      }, abortRef.current.signal);
-      let items = extractItems(fullText);
-      if (items.length === 0) {
-        try {
-          const cleaned = fullText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-          const parsed = JSON.parse(cleaned);
-          items = Array.isArray(parsed) ? parsed : (parsed.categories || []);
-        } catch {}
-      }
-      if (items.length === 0) throw new Error("No resources found -- try riffing again");
+      const { system, user } = buildRiffPrompt(selected, seeds);
+      const full = await streamAPI(system, user, p => setStreamItems(extractItems(p)), abortRef.current.signal);
+      let items = extractItems(full);
+      if (!items.length) { try { items = JSON.parse(full.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim()); if (!Array.isArray(items)) items = items.categories || []; } catch { items = []; } }
+      if (!items.length) throw new Error("No resources found - try again");
       setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [...(s.riffs || []), ...items] } : s));
       setStreamItems([]);
-    } catch (e) {
-      if (e.name !== "AbortError") setError(e.message);
-    } finally { setLoading(false); }
-  }, [selected, loading]);
+    } catch (e) { if (e.name !== "AbortError") setError(e.message); }
+    finally { setLoading(false); }
+  }, [selected, loading, seeds]);
 
   const synthesize = useCallback(async () => {
-    const withRiffs = seeds.filter(s => s.riffs?.length > 0);
     if (seeds.length < 2 || synthLoading) return;
-    const toSynth = withRiffs.length >= 2 ? withRiffs : seeds;
+    const toSynth = seeds.filter(s => s.riffs?.length > 0);
+    const input = toSynth.length >= 2 ? toSynth : seeds;
     setSynthLoading(true); setError(null); setView("synthesis");
     try {
-      const { system, user } = synthPrompt(toSynth);
-      const fullText = await streamAPI(system, user, () => {}, new AbortController().signal);
-      let parsed;
-      try {
-        const cleaned = fullText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-        parsed = JSON.parse(cleaned);
-      } catch {
-        const match = fullText.match(/\[[\s\S]*\]/);
-        if (match) parsed = JSON.parse(match[0]);
-        else throw new Error("Could not parse synthesis");
-      }
+      const { system, user } = buildSynthPrompt(input);
+      const full = await streamAPI(system, user, () => {}, new AbortController().signal);
+      let parsed; try { parsed = JSON.parse(full.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim()); } catch { const m = full.match(/\[[\s\S]*\]/); if (m) parsed = JSON.parse(m[0]); else throw new Error("Parse error"); }
       setSyntheses(Array.isArray(parsed) ? parsed : (parsed.syntheses || []));
     } catch (e) { setError(e.message); }
     finally { setSynthLoading(false); }
   }, [seeds, synthLoading]);
 
-  const clearRiffs = useCallback(() => {
-    if (!selected) return;
-    setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [] } : s));
-  }, [selected]);
-
-  /* --Export handlers --*/
-  const handleExportSeed = useCallback(() => {
-    if (!selected) return;
-    const md = exportSeedMarkdown(selected);
-    const filename = `riff-${selected.text.slice(0, 30).replace(/[^a-zA-Z0-9]/g, "-")}.md`;
-    downloadMarkdown(filename, md);
-  }, [selected]);
-
-  const handleExportAll = useCallback(() => {
-    const md = exportAllMarkdown(seeds, syntheses);
-    downloadMarkdown(`riff-machine-export-${Date.now()}.md`, md);
-  }, [seeds, syntheses]);
-
-  const handleCopySeed = useCallback(async () => {
-    if (!selected) return;
-    const md = exportSeedMarkdown(selected);
-    await copyToClipboard(md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [selected]);
-
-  const handleCopyAll = useCallback(async () => {
-    const md = exportAllMarkdown(seeds, syntheses);
-    await copyToClipboard(md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [seeds, syntheses]);
+  const clearRiffs = useCallback(() => { if (selected) setSeeds(p => p.map(s => s.id === selected.id ? { ...s, riffs: [] } : s)); }, [selected]);
 
   const handleReset = useCallback(() => {
-    if (!window.confirm("Clear all seeds, riffs, and syntheses? This cannot be undone.")) return;
-    setSeeds([]);
-    setSyntheses([]);
-    setSelectedId(null);
-    setView("riffs");
-    setFilter("all");
-    saveState({ seeds: [], selectedId: null, syntheses: [] });
+    if (window.confirm("Clear all seeds, riffs, and syntheses?")) {
+      setSeeds([]); setSyntheses([]); setSelectedId(null); setView("riffs"); setFilter("all");
+      saveState({ seeds: [], selectedId: null, syntheses: [] });
+    }
   }, []);
 
-  const committedRiffs = selected?.riffs || [];
-  const displayRiffs = loading ? [...committedRiffs, ...streamItems] : committedRiffs;
+  const doExportSeed = useCallback(() => { if (selected) downloadMarkdown("riff-" + selected.text.slice(0, 30).replace(/[^a-zA-Z0-9]/g, "-") + ".md", exportSeedMarkdown(selected)); }, [selected]);
+  const doExportAll = useCallback(() => { downloadMarkdown("riff-export.md", exportAllMarkdown(seeds, syntheses)); }, [seeds, syntheses]);
+  const doCopy = useCallback(async (all) => {
+    const md = all ? exportAllMarkdown(seeds, syntheses) : (selected ? exportSeedMarkdown(selected) : "");
+    await copyToClipboard(md); setCopied(true); setTimeout(() => setCopied(false), 2000);
+  }, [seeds, syntheses, selected]);
+
+  // Derived
+  const committed = selected?.riffs || [];
+  const displayRiffs = loading ? [...committed, ...streamItems] : committed;
   const types = ["all", ...new Set(displayRiffs.map(r => r.type).filter(Boolean))];
   const filtered = filter === "all" ? displayRiffs : displayRiffs.filter(r => r.type === filter);
 
-  const selectSeed = useCallback((id) => {
-    setSelectedId(id);
-    setView("riffs");
-    setFilter("all");
-  }, []);
-
-  /* --Shared content renderers --*/
-  const renderRiffsContent = (padding) => (
-    <>
-      <div style={{ padding, borderBottom: "1px solid #f0f0f0" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-              <span style={{ fontSize: 13 }}>{CAT_ICONS[selected.category] || "*"}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#aaa" }}>
-                {selected.category}
-              </span>
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600 }}>{selected.text}</div>
-          </div>
-          {committedRiffs.length > 0 && (
-            <button onClick={clearRiffs} style={smallBtn()}>Clear</button>
-          )}
-        </div>
-      </div>
-      {types.length > 2 && (
-        <div style={{ padding, display: "flex", gap: 4, flexWrap: "wrap", borderBottom: "1px solid #f0f0f0" }}>
-          {types.map(t => (
-            <button key={t} onClick={() => setFilter(t)} style={{
-              padding: "3px 9px", fontSize: 11, fontWeight: 600,
-              background: filter === t ? "#000" : "#f5f5f5",
-              color: filter === t ? "#fff" : "#666",
-              border: "none", cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize",
-            }}>{t === "all" ? `All (${displayRiffs.length})` : `${ICONS[t] || ""} ${t}`}</button>
-          ))}
-        </div>
-      )}
-      <div style={{ flex: 1, overflowY: "auto", padding }}>
-        {error && (
-          <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>{error}</div>
-        )}
-        {filtered.length === 0 && !loading && (
-          <div style={{ color: "#bbb", fontSize: 13, paddingTop: 24, textAlign: "center" }}>
-            Hit Riff to discover resources through the {selected.category} lens
-          </div>
-        )}
-        {filtered.map((item, i) => <ResourceCard key={`${selected.id}-${i}-${item.title}`} item={item} index={i} />)}
-        {loading && filtered.length === 0 && (
-          <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Discovering..."} <Dots /></div>
-        )}
-      </div>
-    </>
-  );
-
-  const renderSynthesisContent = (padding) => (
-    <div style={{ flex: 1, overflowY: "auto", padding }}>
-      {error && (
-        <div style={{ padding: "10px 14px", background: "#fff5f5", border: "1px solid #fcc", color: "#c00", fontSize: 12.5, marginBottom: 14, lineHeight: 1.5 }}>{error}</div>
-      )}
-      {syntheses.length === 0 && !synthLoading && (
-        <div style={{ color: "#bbb", fontSize: 13, paddingTop: 24, textAlign: "center", lineHeight: 1.7 }}>
-          {seedsWithRiffs < 2 ? "Riff on 2+ seeds, then Synthesize" : "Hit Synthesize to find cross-connections"}
-        </div>
-      )}
-      {syntheses.map((syn, i) => <SynthesisCard key={i} syn={syn} index={i} />)}
-      {synthLoading && <div style={{ textAlign: "center", padding: "24px 0", color: "#999", fontSize: 13 }}>{"Synthesizing..."} <Dots /></div>}
+  const tabBar = (
+    <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
+      <button onClick={() => setView("riffs")} style={{ flex: 1, padding: "12px", fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", background: "none", border: "none", borderBottom: view === "riffs" ? "2px solid #000" : "2px solid transparent", color: view === "riffs" ? "#000" : "#999", fontFamily: "inherit", cursor: "pointer", minHeight: 44 }}>Resources</button>
+      <button onClick={() => setView("synthesis")} style={{ flex: 1, padding: "12px", fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", background: "none", border: "none", borderBottom: view === "synthesis" ? "2px solid #000" : "2px solid transparent", color: view === "synthesis" ? "#000" : "#999", fontFamily: "inherit", cursor: "pointer", minHeight: 44 }}>Synthesis{syntheses.length > 0 ? " (" + syntheses.length + ")" : ""}</button>
     </div>
   );
 
-  /* --MOBILE LAYOUT --*/
+  const resultsProps = { selected, displayRiffs, filtered, types, filter, setFilter, syntheses, view, loading, synthLoading, error, clearRiffs, doExportSeed, doCopy, copied, seedsWithRiffs, isMobile };
+
+  /* =================== MOBILE =================== */
   if (isMobile) {
     return (
-      <>
-        <style>{`
-          .rm-seed-chips::-webkit-scrollbar { display: none; }
-          .rm-seed-chips { -ms-overflow-style: none; scrollbar-width: none; }
-        `}</style>
-        <div style={{ display: "flex", flexDirection: "column", height: "100vh", height: "100dvh", width: "100%", fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", background: "#fff", color: "#000", overflow: "hidden" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 16px 8px", flexShrink: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
-              Riff Machine
-            </div>
-            <div style={{ fontSize: 12, color: "#999", fontWeight: 400, marginBottom: 8 }}>
-              Pick a category, type an idea, hit Riff.
-            </div>
-          </div>
+      <div style={{ fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", background: "#fff", color: "#000", minHeight: "100vh", minHeight: "100dvh" }}>
+        <style>{cssBlock}</style>
 
-          {/* Category dropdown -- full width */}
-          <div style={{ padding: "0 16px 8px", flexShrink: 0 }}>
-            <select value={category} onChange={e => setCategory(e.target.value)} style={{
-              width: "100%", padding: "10px 12px", border: "1px solid #ccc", borderRadius: 0,
-              fontSize: 14, fontFamily: "inherit", background: "#fff",
-              cursor: "pointer", appearance: "auto", WebkitAppearance: "auto", minHeight: 44,
-            }}>
-              {SEED_CATEGORIES.map(c => (
-                <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Input + add button */}
-          <div style={{ display: "flex", gap: 6, padding: "0 16px 8px", flexShrink: 0 }}>
-            <input ref={inputRef} value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addSeed()}
-              placeholder="Enter a seed idea..."
-              style={{ flex: 1, padding: "10px 12px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit", minHeight: 44, minWidth: 0 }}
-            />
-            <button onClick={addSeed} disabled={!input.trim()} style={{
-              padding: "10px 14px", background: input.trim() ? "#000" : "#ddd",
-              color: "#fff", border: "none", fontSize: 14, cursor: input.trim() ? "pointer" : "default",
-              fontFamily: "inherit", fontWeight: 600, minHeight: 44,
-            }}>+</button>
-          </div>
-
-          {/* Seed chips -- horizontal scroll */}
-          {seeds.length > 0 && (
-            <div className="rm-seed-chips" style={{
-              display: "flex", gap: 8, overflowX: "auto", padding: "8px 16px",
-              WebkitOverflowScrolling: "touch", borderBottom: "1px solid #e0e0e0", flexShrink: 0,
-            }}>
-              {seeds.map(seed => (
-                <button key={seed.id} onClick={() => selectSeed(seed.id)} style={{
-                  flexShrink: 0, padding: "8px 14px", fontSize: 13,
-                  background: seed.id === selectedId ? "#000" : "#f0f0f0",
-                  color: seed.id === selectedId ? "#fff" : "#000",
-                  border: "none", borderRadius: 20, cursor: "pointer",
-                  whiteSpace: "nowrap", fontFamily: "inherit",
-                  display: "flex", alignItems: "center", gap: 4,
-                  minHeight: 44,
-                }}>
-                  <span>{CAT_ICONS[seed.category]}</span>
-                  <span>{seed.text.length > 20 ? seed.text.slice(0, 20) + "..." : seed.text}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Action buttons -- stacked vertically */}
-          <div style={{ padding: "8px 16px", display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-            <button onClick={riff} disabled={!selected || loading} style={{
-              width: "100%", padding: "12px 14px", minHeight: 44,
-              background: !selected || loading ? "#e8e8e8" : "#000",
-              color: !selected || loading ? "#aaa" : "#fff",
-              border: "none", fontSize: 12, fontWeight: 700,
-              letterSpacing: "0.08em", textTransform: "uppercase",
-              cursor: !selected || loading ? "default" : "pointer", fontFamily: "inherit",
-            }}>{loading ? <Dots /> : "Riff"}</button>
-
-            <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{
-              width: "100%", padding: "12px 14px", minHeight: 44, background: "transparent",
-              color: seeds.length < 2 || synthLoading ? "#ccc" : "#000",
-              border: `1px solid ${seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"}`,
-              fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
-              cursor: seeds.length < 2 || synthLoading ? "default" : "pointer", fontFamily: "inherit",
-            }}>{synthLoading ? <Dots /> : `Synthesize${seeds.length >= 2 ? ` (${seeds.length})` : ""}`}</button>
-
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={handleExportAll} disabled={seeds.length === 0} style={{
-                ...smallBtn(seeds.length > 0), flex: 1, minHeight: 44,
-              }}>Export All</button>
-              <button onClick={handleCopyAll} disabled={seeds.length === 0} style={{
-                ...smallBtn(seeds.length > 0), flex: 1, minHeight: 44,
-              }}>{copied ? "Copied!" : "Copy MD"}</button>
-            </div>
-
-            <button onClick={handleReset} style={{
-              background: "none", border: "none", padding: "4px 0",
-              fontSize: 11, color: "#bbb", textTransform: "uppercase",
-              letterSpacing: "0.06em", cursor: "pointer", fontFamily: "inherit",
-              textAlign: "center", width: "100%",
-            }}>Reset</button>
-          </div>
-
-          {/* Tab bar */}
-          {(selected || syntheses.length > 0) && (
-            <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", flexShrink: 0 }}>
-              {selected && (
-                <button onClick={() => setView("riffs")} style={{
-                  flex: 1, padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
-                  letterSpacing: "0.06em", textTransform: "uppercase", minHeight: 44,
-                  background: "none", border: "none", cursor: "pointer",
-                  borderBottom: view === "riffs" ? "2px solid #000" : "2px solid transparent",
-                  color: view === "riffs" ? "#000" : "#999", fontFamily: "inherit",
-                }}>Resources</button>
-              )}
-              <button onClick={() => setView("synthesis")} style={{
-                flex: 1, padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
-                letterSpacing: "0.06em", textTransform: "uppercase", minHeight: 44,
-                background: "none", border: "none", cursor: "pointer",
-                borderBottom: view === "synthesis" ? "2px solid #000" : "2px solid transparent",
-                color: view === "synthesis" ? "#000" : "#999", fontFamily: "inherit",
-              }}>Synthesis {syntheses.length > 0 && `(${syntheses.length})`}</button>
-            </div>
-          )}
-
-          {/* Results area -- takes remaining height */}
-          <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", WebkitOverflowScrolling: "touch" }}>
-            {!selected && view !== "synthesis" ? (
-              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>
-                Select a seed and hit Riff
-              </div>
-            ) : view === "riffs" && selected ? (
-              renderRiffsContent("12px 16px")
-            ) : view === "synthesis" ? (
-              renderSynthesisContent("16px")
-            ) : null}
-          </main>
+        {/* Header */}
+        <div style={{ padding: "14px 16px 8px" }}>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase" }}>Riff Machine</div>
+          <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>Pick a category, type an idea, hit Riff.</div>
         </div>
-      </>
+
+        {/* Category */}
+        <div style={{ padding: "6px 16px" }}>
+          <select value={category} onChange={e => setCategory(e.target.value)} style={{ width: "100%", padding: "10px 12px", border: "1px solid #ccc", borderRadius: 0, fontSize: 14, fontFamily: "inherit", background: "#fff", minHeight: 44, WebkitAppearance: "auto", appearance: "auto" }}>
+            {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+          </select>
+        </div>
+
+        {/* Input */}
+        <div style={{ padding: "6px 16px", display: "flex", gap: 8 }}>
+          <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addSeed()}
+            placeholder="Enter a seed idea..." style={{ flex: 1, padding: "10px 12px", border: "1px solid #ccc", borderRadius: 0, fontSize: 14, fontFamily: "inherit", minHeight: 44 }} />
+          <button onClick={addSeed} disabled={!input.trim()} style={{ padding: "10px 16px", background: input.trim() ? "#000" : "#ddd", color: "#fff", border: "none", fontSize: 16, fontWeight: 600, minHeight: 44, minWidth: 44 }}>+</button>
+        </div>
+
+        {/* Seed chips */}
+        {seeds.length > 0 && (
+          <div style={{ display: "flex", gap: 8, padding: "10px 16px", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            {seeds.map(seed => (
+              <button key={seed.id} onClick={() => { setSelectedId(seed.id); setView("riffs"); setFilter("all"); }}
+                style={{ flexShrink: 0, padding: "8px 14px", fontSize: 13, background: seed.id === selectedId ? "#000" : "#f0f0f0", color: seed.id === selectedId ? "#fff" : "#000", border: "none", borderRadius: 20, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", minHeight: 36 }}>
+                {catIcon(seed.category)} {seed.text.length > 18 ? seed.text.slice(0, 18) + "..." : seed.text}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ padding: "8px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={riff} disabled={!selected || loading} style={{ flex: 1, padding: "12px", background: !selected || loading ? "#e8e8e8" : "#000", color: !selected || loading ? "#aaa" : "#fff", border: "none", fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", minHeight: 44 }}>{loading ? "..." : "RIFF"}</button>
+            <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{ flex: 1, padding: "12px", background: "transparent", color: seeds.length < 2 || synthLoading ? "#ccc" : "#000", border: "1px solid " + (seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"), fontSize: 13, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", minHeight: 44 }}>{synthLoading ? "..." : "SYNTH"}</button>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={doExportAll} style={{ flex: 1, padding: "10px", background: "none", border: "1px solid #ddd", fontSize: 12, fontFamily: "inherit", color: "#666", minHeight: 44 }}>Export All</button>
+            <button onClick={() => doCopy(true)} style={{ flex: 1, padding: "10px", background: "none", border: "1px solid #ddd", fontSize: 12, fontFamily: "inherit", color: "#666", minHeight: 44 }}>{copied ? "Done" : "Copy MD"}</button>
+          </div>
+          <button onClick={handleReset} style={{ background: "none", border: "none", fontSize: 11, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.06em", padding: "6px", fontFamily: "inherit", cursor: "pointer" }}>RESET</button>
+        </div>
+
+        {/* Tabs + Results */}
+        {tabBar}
+        <ResultsContent {...resultsProps} />
+      </div>
     );
   }
 
-  /* --DESKTOP LAYOUT --*/
+  /* =================== DESKTOP =================== */
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
+    <div style={{ display: "flex", height: "100vh", width: "100%", fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif", background: "#fff", color: "#000", overflow: "hidden" }}>
+      <style>{cssBlock}</style>
+
       {/* Sidebar */}
-      <nav style={{ width: 280, minWidth: 280, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", height: "100%" }}>
-        <div style={{ padding: "16px 12px 12px", borderBottom: "1px solid #e0e0e0" }}>
-          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
-            Riff Machine
-          </div>
-          <div style={{ fontSize: 12, color: "#999", fontWeight: 400, marginBottom: 12 }}>
-            Pick a category, type an idea, hit Riff.
-          </div>
-          <select value={category} onChange={e => setCategory(e.target.value)} style={{
-            width: "100%", padding: "7px 8px", marginBottom: 8,
-            border: "1px solid #ccc", borderRadius: 0, fontSize: 13,
-            fontFamily: "inherit", background: "#fff", cursor: "pointer", appearance: "auto",
-          }}>
-            {SEED_CATEGORIES.map(c => (
-              <option key={c} value={c}>{CAT_ICONS[c]} {c.charAt(0).toUpperCase() + c.slice(1)}</option>
-            ))}
+      <nav style={{ width: 260, minWidth: 260, borderRight: "1px solid #e0e0e0", display: "flex", flexDirection: "column", height: "100%" }}>
+        {/* Top: title + inputs */}
+        <div style={{ padding: "16px 14px 12px", borderBottom: "1px solid #e0e0e0" }}>
+          <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 2 }}>Riff Machine</div>
+          <div style={{ fontSize: 11.5, color: "#999", marginBottom: 12 }}>Pick a category, type an idea, hit Riff.</div>
+          <select value={category} onChange={e => setCategory(e.target.value)} style={{ width: "100%", padding: "7px 8px", marginBottom: 8, border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit", background: "#fff", cursor: "pointer", appearance: "auto" }}>
+            {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
           </select>
           <div style={{ display: "flex", gap: 5 }}>
-            <input ref={inputRef} value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addSeed()}
-              placeholder="Enter a seed idea..."
-              style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }}
-            />
-            <button onClick={addSeed} disabled={!input.trim()} style={{
-              padding: "7px 11px", background: input.trim() ? "#000" : "#ddd",
-              color: "#fff", border: "none", fontSize: 14, cursor: input.trim() ? "pointer" : "default",
-              fontFamily: "inherit", fontWeight: 600,
-            }}>+</button>
+            <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addSeed()}
+              placeholder="Enter a seed idea..." style={{ flex: 1, padding: "7px 10px", border: "1px solid #ccc", borderRadius: 0, fontSize: 13, fontFamily: "inherit" }} />
+            <button onClick={addSeed} disabled={!input.trim()} style={{ padding: "7px 11px", background: input.trim() ? "#000" : "#ddd", color: "#fff", border: "none", fontSize: 14, fontWeight: 600, fontFamily: "inherit", cursor: input.trim() ? "pointer" : "default" }}>+</button>
           </div>
         </div>
 
         {/* Seeds list */}
         <div style={{ flex: 1, overflowY: "auto" }}>
           {seeds.map(seed => (
-            <SeedItem key={seed.id} seed={seed} isSelected={seed.id === selectedId}
-              onClick={() => selectSeed(seed.id)}
-              onDelete={() => deleteSeed(seed.id)} />
+            <div key={seed.id} onClick={() => { setSelectedId(seed.id); setView("riffs"); setFilter("all"); }}
+              style={{ padding: "10px 14px", cursor: "pointer", background: seed.id === selectedId ? "#000" : "transparent", color: seed.id === selectedId ? "#fff" : "#000", borderBottom: "1px solid #e8e8e8", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13, flexShrink: 0 }}>{catIcon(seed.category)}</span>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 }}>{seed.text}</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: seed.id === selectedId ? "#aaa" : "#999", marginTop: 2, paddingLeft: 24 }}>
+                  {seed.category}{seed.riffs?.length > 0 ? " - " + seed.riffs.length + " found" : ""}
+                </div>
+              </div>
+              <button onClick={e => { e.stopPropagation(); deleteSeed(seed.id); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: seed.id === selectedId ? "#777" : "#ccc", fontSize: 14, lineHeight: 1, flexShrink: 0, padding: "4px" }}
+                aria-label="Remove seed">
+                <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.5" fill="none"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+              </button>
+            </div>
           ))}
         </div>
 
-        {/* Action buttons */}
-        <div style={{ padding: 10, borderTop: "1px solid #e0e0e0", display: "flex", flexDirection: "column", gap: 5 }}>
-          <button onClick={riff} disabled={!selected || loading} style={{
-            width: "100%", padding: "10px 14px",
-            background: !selected || loading ? "#e8e8e8" : "#000",
-            color: !selected || loading ? "#aaa" : "#fff",
-            border: "none", fontSize: 12, fontWeight: 700,
-            letterSpacing: "0.08em", textTransform: "uppercase",
-            cursor: !selected || loading ? "default" : "pointer", fontFamily: "inherit",
-          }}>{loading ? <Dots /> : "Riff"}</button>
-
-          <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{
-            width: "100%", padding: "10px 14px", background: "transparent",
-            color: seeds.length < 2 || synthLoading ? "#ccc" : "#000",
-            border: `1px solid ${seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"}`,
-            fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
-            cursor: seeds.length < 2 || synthLoading ? "default" : "pointer", fontFamily: "inherit",
-          }}>{synthLoading ? <Dots /> : `Synthesize${seeds.length >= 2 ? ` (${seeds.length})` : ""}`}</button>
-
-          <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
-            <button onClick={handleExportAll} disabled={seeds.length === 0} style={{
-              ...smallBtn(seeds.length > 0), flex: 1,
-            }}>Export All</button>
-            <button onClick={handleCopyAll} disabled={seeds.length === 0} style={{
-              ...smallBtn(seeds.length > 0), flex: 1,
-            }}>{copied ? "Copied!" : "Copy MD"}</button>
+        {/* Actions - RIGHT BELOW seeds, not pinned to bottom */}
+        <div style={{ padding: "10px 14px", borderTop: "1px solid #e0e0e0", display: "flex", flexDirection: "column", gap: 5 }}>
+          <button onClick={riff} disabled={!selected || loading} style={{ width: "100%", padding: "10px 14px", background: !selected || loading ? "#e8e8e8" : "#000", color: !selected || loading ? "#aaa" : "#fff", border: "none", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", cursor: !selected || loading ? "default" : "pointer" }}>{loading ? "..." : "RIFF"}</button>
+          <button onClick={synthesize} disabled={seeds.length < 2 || synthLoading} style={{ width: "100%", padding: "10px 14px", background: "transparent", color: seeds.length < 2 || synthLoading ? "#ccc" : "#000", border: "1px solid " + (seeds.length < 2 || synthLoading ? "#e0e0e0" : "#000"), fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "inherit", cursor: seeds.length < 2 || synthLoading ? "default" : "pointer" }}>{synthLoading ? "..." : "SYNTHESIZE (" + seeds.length + ")"}</button>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={doExportAll} disabled={seeds.length === 0} style={{ ...tinyBtn, flex: 1 }}>Export All</button>
+            <button onClick={() => doCopy(true)} disabled={seeds.length === 0} style={{ ...tinyBtn, flex: 1 }}>{copied ? "Done" : "Copy MD"}</button>
           </div>
-          <button onClick={handleReset} style={{
-            background: "none", border: "none", padding: "4px 0",
-            fontSize: 11, color: "#bbb", textTransform: "uppercase",
-            letterSpacing: "0.06em", cursor: "pointer", fontFamily: "inherit",
-            marginTop: 8, textAlign: "center", width: "100%",
-          }}
-            onMouseEnter={e => { e.currentTarget.style.color = "#999"; }}
-            onMouseLeave={e => { e.currentTarget.style.color = "#bbb"; }}
-          >Reset</button>
+          <button onClick={handleReset} style={{ background: "none", border: "none", fontSize: 10, color: "#bbb", textTransform: "uppercase", letterSpacing: "0.06em", padding: "4px", fontFamily: "inherit", cursor: "pointer", textAlign: "center" }}>RESET</button>
         </div>
       </nav>
 
-      {/* Main Panel */}
+      {/* Main panel */}
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Tab bar */}
-        {(selected || syntheses.length > 0) && (
-          <div style={{
-            display: "flex", borderBottom: "1px solid #e0e0e0",
-            padding: "0 24px", justifyContent: "space-between", alignItems: "center",
-          }}>
-            <div style={{ display: "flex" }}>
-              {selected && (
-                <button onClick={() => setView("riffs")} style={{
-                  padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
-                  letterSpacing: "0.06em", textTransform: "uppercase",
-                  background: "none", border: "none", cursor: "pointer",
-                  borderBottom: view === "riffs" ? "2px solid #000" : "2px solid transparent",
-                  color: view === "riffs" ? "#000" : "#999", fontFamily: "inherit",
-                }}>Resources</button>
-              )}
-              <button onClick={() => setView("synthesis")} style={{
-                padding: "11px 16px", fontSize: 11.5, fontWeight: 700,
-                letterSpacing: "0.06em", textTransform: "uppercase",
-                background: "none", border: "none", cursor: "pointer",
-                borderBottom: view === "synthesis" ? "2px solid #000" : "2px solid transparent",
-                color: view === "synthesis" ? "#000" : "#999", fontFamily: "inherit",
-              }}>Synthesis {syntheses.length > 0 && `(${syntheses.length})`}</button>
-            </div>
-            {view === "riffs" && selected?.riffs?.length > 0 && (
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={handleExportSeed} style={smallBtn()}>Export .md</button>
-                <button onClick={handleCopySeed} style={smallBtn()}>{copied ? "Copied!" : "Copy"}</button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Content */}
-        {!selected && view !== "synthesis" ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>
-            Select a seed and hit Riff
-          </div>
-        ) : view === "riffs" && selected ? (
-          renderRiffsContent("14px 24px 10px")
-        ) : view === "synthesis" ? (
-          renderSynthesisContent("20px 28px")
-        ) : null}
+        {tabBar}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <ResultsContent {...resultsProps} />
+        </div>
       </main>
     </div>
   );
 }
+
+const cssBlock = `
+  @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  * { box-sizing: border-box; }
+  ::selection { background:#000; color:#fff; }
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:#ccc; border-radius:2px; }
+  select:focus, input:focus { outline: 1px solid #000; }
+`;
