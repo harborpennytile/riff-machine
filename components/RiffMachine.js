@@ -22,10 +22,11 @@ async function callAPI(system,userMsg,tools){
   const r=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:MODEL,max_tokens:2500,stream:false,system,messages:[{role:"user",content:userMsg}],tools:tools||undefined})});
   if(!r.ok){const t=await r.text().catch(()=>"");throw new Error(t.includes("429")?"Rate limit reached. Wait a bit.":"API error "+r.status)}
   const d=await r.json();
-  return d.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+  const raw=d.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+  return raw.replace(/<\/?cite[^>]*>/g,"").replace(/<\/?antml:cite[^>]*>/g,"");
 }
 
-function extractItems(t){const items=[];const re=/\{[^{}]*"type"\s*:\s*"[^"]+?"[^{}]*"title"\s*:\s*"[^"]*?"[^{}]*\}/g;let m;while((m=re.exec(t))!==null){try{const o=JSON.parse(m[0]);if(o.type&&o.title)items.push(o)}catch{}}return items}
+function extractItems(t){const c=t.replace(/<\/?cite[^>]*>/g,"").replace(/<\/?antml:cite[^>]*>/g,"");const items=[];const re=/\{[^{}]*"type"\s*:\s*"[^"]+?"[^{}]*"title"\s*:\s*"[^"]*?"[^{}]*\}/g;let m;while((m=re.exec(c))!==null){try{const o=JSON.parse(m[0]);if(o.type&&o.title)items.push(o)}catch{}}return items}
 
 function buildRiff(seed,all){
   const others=all.filter(s=>s.id!==seed.id);
@@ -242,7 +243,7 @@ export default function RiffMachine(){
     return(
       <div style={{fontFamily:"'Helvetica Neue',Helvetica,Arial,sans-serif",background:"#fff",color:"#000",minHeight:"100vh"}}>
         <style>{CSS}</style>
-        <div style={{padding:"12px 16px 4px"}}><div style={{fontSize:12,fontWeight:800,letterSpacing:"0.14em",textTransform:"uppercase"}}>Riff Machine</div><div style={{fontSize:11,color:"#999",marginTop:2}}>Pick a category, type an idea, hit Riff.</div></div>
+        <div style={{padding:"12px 16px 4px"}}><div style={{display:"flex",alignItems:"center",gap:8}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="11"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="8" y1="4" x2="8" y2="10"/><line x1="16" y1="4" x2="16" y2="10"/><path d="M8 10 Q8 13 12 14"/><path d="M16 10 Q16 13 12 14"/><line x1="12" y1="14" x2="12" y2="20"/></svg><span style={{fontSize:12,fontWeight:800,letterSpacing:"0.14em",textTransform:"uppercase"}}>Riff Machine</span></div><div style={{fontSize:11,color:"#999",marginTop:2}}>Pick a category, type an idea, hit Riff.</div></div>
         <div style={{padding:"6px 16px"}}>{catSelect}</div>
         <div style={{padding:"6px 16px"}}>{inputRow}</div>
         {seeds.length>0&&<div style={{display:"flex",gap:6,padding:"8px 16px",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>{seeds.map(s=><button key={s.id} onClick={()=>{setSelId(s.id);setView("riffs");setFilt("all")}} style={{flexShrink:0,padding:"6px 12px",fontSize:12,background:s.id===selId?"#000":"#f0f0f0",color:s.id===selId?"#fff":"#000",border:"none",borderRadius:16,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit",minHeight:32,boxShadow:s.id===selId?"0 2px 8px rgba(0,0,0,0.2)":"none"}}>{ci(s.category)} {s.text.length>15?s.text.slice(0,15)+"...":s.text}</button>)}</div>}
@@ -259,7 +260,7 @@ export default function RiffMachine(){
       <style>{CSS}</style>
       <nav style={{width:260,minWidth:260,borderRight:"1px solid #e0e0e0",display:"flex",flexDirection:"column",height:"100%"}}>
         <div style={{padding:"14px 12px 10px",borderBottom:"1px solid #e0e0e0"}}>
-          <div style={{fontSize:11,fontWeight:800,letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:2}}>Riff Machine</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="11"/><line x1="12" y1="4" x2="12" y2="14"/><line x1="8" y1="4" x2="8" y2="10"/><line x1="16" y1="4" x2="16" y2="10"/><path d="M8 10 Q8 13 12 14"/><path d="M16 10 Q16 13 12 14"/><line x1="12" y1="14" x2="12" y2="20"/></svg><span style={{fontSize:11,fontWeight:800,letterSpacing:"0.14em",textTransform:"uppercase"}}>Riff Machine</span></div>
           <div style={{fontSize:11,color:"#999",marginBottom:10}}>Pick a category, type an idea, hit Riff.</div>
           {catSelect}
           <div style={{marginTop:8}}>{inputRow}</div>
